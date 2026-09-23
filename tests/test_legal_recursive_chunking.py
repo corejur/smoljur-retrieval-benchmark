@@ -77,6 +77,19 @@ def test_table_chunks_repeat_header_and_preserve_rows() -> None:
     assert all(chunk.word_count <= 100 for chunk in chunks)
 
 
+def test_oversized_header_only_table_respects_hard_limit() -> None:
+    text = "| " + " ".join(f"value{index}" for index in range(80)) + " |"
+
+    chunks = chunk_document(
+        {"document_id": "doc-header-only-table", "text": text},
+        config=config(max_words=20, target_words=15),
+    )
+
+    assert len(chunks) > 1
+    assert all(chunk.chunk_type == "table" for chunk in chunks)
+    assert all(chunk.word_count <= 20 for chunk in chunks)
+
+
 def test_short_prose_tail_is_merged_with_preceding_table_context() -> None:
     table = (
         "| Processo | Distribuição |\n"

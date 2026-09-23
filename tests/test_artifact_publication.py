@@ -15,7 +15,7 @@ def _build_generation(root: Path, marker: str) -> str:
         "chunks",
     ):
         directory = root / name
-        directory.mkdir()
+        directory.mkdir(parents=True)
         (directory / "marker.txt").write_text(marker, encoding="utf-8")
     return marker
 

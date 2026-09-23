@@ -1,0 +1,11 @@
+# Dependencies of the v4 Representative Redator pipeline (scripts/v4).
+# This repository does not vendor BEIR: its evaluator and data loader come
+# from the beir package. FAISS is deliberately absent; pgvector is the only
+# v4 vector store.
+beir>=2.0             # BEIR evaluator (pytrec_eval) and GenericDataLoader
+numpy
+tiktoken>=0.7         # o200k_base token counts for chunking and query limits
+psycopg[binary]>=3.1  # PostgreSQL client
+pgvector>=0.2.5       # vector(1024) adaptation for psycopg
+matplotlib>=3.5       # scripts/v4/plots.py mean-metric charts
+pytest                # tests/v4
