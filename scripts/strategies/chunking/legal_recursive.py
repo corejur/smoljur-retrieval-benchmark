@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Callable, Mapping, Protocol, Sequence
 
 
 _HEADING = re.compile(
@@ -50,6 +50,9 @@ class ChunkingConfig:
     overlap_words: int = 50
     minimum_words: int = 50
     strategy_version: str = "2"
+    #: Merge any undersized chunk into its neighbour, not just a segment's
+    #: tail. Off by default so v1-v3 output is unchanged.
+    merge_small_chunks: bool = False
 
     def validate(self) -> None:
         if self.max_words < 1:
@@ -123,7 +126,9 @@ def _is_heading(text: str) -> bool:
     return len(text) <= 180 and bool(_HEADING.fullmatch(text.strip()))
 
 
-def _segments(text: str) -> list[tuple[int, str, list[_Span]]]:
+def _segments(
+    text: str, is_heading: Callable[[str], bool] = _is_heading
+) -> list[tuple[int, str, list[_Span]]]:
     """Split at headings while identifying true document/event boundaries."""
     result: list[tuple[int, str, list[_Span]]] = []
     current: list[_Span] = []
@@ -146,7 +151,7 @@ def _segments(text: str) -> list[tuple[int, str, list[_Span]]]:
             flush()
             section = ""
             region += 1
-        if _is_heading(line.text):
+        if is_heading(line.text):
             flush()
             section = line.text
         current.append(line)
@@ -355,7 +360,22 @@ def _pack_table(
 ) -> list[_DraftChunk]:
     header, rows = _table_header(spans)
     if not rows:
-        return [_draft(header, section, "table", counter)]
+        units = [
+            piece
+            for span in header
+            for piece in _split_oversized_span(span, counter, config)
+        ]
+        drafts: list[_DraftChunk] = []
+        current: list[_Span] = []
+        for unit in units:
+            candidate = [*current, unit]
+            if current and _unit_count(counter, _join(candidate)) > config.target_words:
+                drafts.append(_draft(current, section, "table", counter))
+                current = []
+            current.append(unit)
+        if current:
+            drafts.append(_draft(current, section, "table", counter))
+        return _merge_small_tail(drafts, counter, config)
 
     drafts: list[_DraftChunk] = []
     current_rows: list[_Span] = []
@@ -404,6 +424,58 @@ def _merge_small_tail(
         )
     ]
     return drafts
+
+
+def _merge_undersized(
+    text: str,
+    drafts: Sequence[_DraftChunk],
+    regions: Sequence[int],
+    counter: LengthCounter,
+    config: ChunkingConfig,
+) -> list[_DraftChunk]:
+    """Fold undersized drafts into the preceding one where it is safe.
+
+    `_merge_small_tail` only ever considers a segment's final draft, which
+    leaves form-structured documents full of one-line fragments. This walks
+    every draft, merging whenever either side is below the minimum and the two
+    are adjacent within the same region.
+    """
+    merged: list[_DraftChunk] = []
+    merged_regions: list[int] = []
+    for draft, region in zip(drafts, regions):
+        if merged:
+            previous = merged[-1]
+            undersized = (
+                previous.word_count < config.minimum_words
+                or draft.word_count < config.minimum_words
+            )
+            if (
+                undersized
+                and draft.end > previous.end
+                and region == merged_regions[-1]
+            ):
+                # Slice the document rather than concatenating the two drafts:
+                # consecutive chunks overlap, so concatenation would duplicate
+                # the shared words and desynchronize text from offsets.
+                combined = text[previous.start : draft.end].strip()
+                count = _unit_count(counter, combined)
+                if count <= config.max_words:
+                    merged[-1] = _DraftChunk(
+                        text=combined,
+                        start=previous.start,
+                        end=draft.end,
+                        section=previous.section or draft.section,
+                        kind=(
+                            previous.kind
+                            if previous.kind == draft.kind
+                            else "mixed"
+                        ),
+                        word_count=count,
+                    )
+                    continue
+        merged.append(draft)
+        merged_regions.append(region)
+    return merged
 
 
 def _coalesce_adjacent_sections(
@@ -473,8 +545,13 @@ def chunk_document(
     document: Mapping[str, Any],
     counter: LengthCounter | None = None,
     config: ChunkingConfig = ChunkingConfig(),
+    is_heading: Callable[[str], bool] | None = None,
 ) -> list[Chunk]:
-    """Chunk one cleaned document while preserving source character offsets."""
+    """Chunk one cleaned document while preserving source character offsets.
+
+    `is_heading` overrides section detection; it defaults to the v1-v3 rules so
+    existing callers are unaffected.
+    """
     config.validate()
     counter = counter or WordCounter()
     if "document_id" not in document or "text" not in document:
@@ -486,16 +563,23 @@ def chunk_document(
         return []
 
     drafts: list[_DraftChunk] = []
+    regions: list[int] = []
     previous_region: int | None = None
-    for region, section, spans in _segments(text):
+    for region, section, spans in _segments(text, is_heading or _is_heading):
         incoming = _chunk_segment(spans, section, counter, config)
-        if previous_region == region:
+        if previous_region == region and drafts and incoming:
+            before = len(drafts)
             drafts = _coalesce_adjacent_sections(
                 drafts, incoming, counter, config
             )
+            absorbed = before + len(incoming) - len(drafts)
+            regions.extend([region] * (len(incoming) - absorbed))
         else:
             drafts.extend(incoming)
+            regions.extend([region] * len(incoming))
         previous_region = region
+    if config.merge_small_chunks:
+        drafts = _merge_undersized(text, drafts, regions, counter, config)
 
     chunks: list[Chunk] = []
     for index, draft in enumerate(drafts):
@@ -526,12 +610,12 @@ def chunk_documents(
     documents: Sequence[Mapping[str, Any]],
     counter: LengthCounter | None = None,
     config: ChunkingConfig = ChunkingConfig(),
+    is_heading: Callable[[str], bool] | None = None,
 ) -> list[Chunk]:
     """Plug-in interface: chunk cleaned documents into retrieval records."""
     counter = counter or WordCounter()
     chunks: list[Chunk] = []
     for document in documents:
-        chunks.extend(chunk_document(document, counter, config))
+        chunks.extend(chunk_document(document, counter, config, is_heading))
     return chunks
-
 
