@@ -68,7 +68,25 @@ The examples show required fields; additional documented metadata may be present
 
 Audits are line-delimited objects with source or query identity and a specific reason. `rejected_sources.jsonl` is for whole-source rejection; `dropped_queries.jsonl` is for question exclusion; `unmapped_citations.jsonl` includes citation identity and mapping failure reason; `cleaning_events.jsonl` and `plain_text_violations.jsonl` explain transformations or residual quality problems. A blank question receives a dropped-query audit instead of disappearing silently.
 
-`meta/manifest.json` records pipeline label `redator-v4`, split `test`, the test-source SHA-256 and row count, chunking and filtering configuration, summary counters, generation ID, and generation time. Counts must agree with emitted artifacts. Consumers reject a generation with missing required files or broken ID references before indexing, retrieval, or evaluation.
+`meta/manifest.json` is the generation manifest. These keys are required; a consumer that cannot read one rejects the generation. Additional documented keys may be present.
+
+| Key | Contract |
+|---|---|
+| `pipeline` | Literal `redator-v4`. |
+| `split` | Literal `test` for a production generation. |
+| `generation_id` | Unique ID of this generation; matches the `generations/<generation-id>/` directory name. |
+| `generated_at` | Generation timestamp. |
+| `source_sha256` | SHA-256 of the test CSV, as above. |
+| `source_row_count` | Row count of that CSV (1,000 in production). |
+| `chunking` | Chunk profile object, with `length_unit` and `length_unit_encoding` naming the tokenizer. |
+| `relevance`, `citation_filter`, `corpus_text`, `max_citation_words`, `max_gold_chunks`, `document_filter`, `query_filter` | The label policy in force for this generation. |
+| `summary` | Counter object; see below. |
+
+`summary` carries the counters and **must** contain `source_rows`, `rejected_sources`, `documents`, `chunks`, `queries`, `queries_retained`, `qrels`, `unmapped_citations`, and `plain_text_violations`. Every counter must agree exactly with the emitted artifacts.
+
+Two of these are load-bearing beyond this contract. **`summary.chunks` is the completeness contract for an index build** — the published corpus chunk count that [model-index.md](model-index.md) requires a build's PostgreSQL row count to equal; it is nested under `summary`, not a top-level `chunks` key. **`generation_manifest_sha256`** is the SHA-256 over this file's serialized bytes, recorded by an index build (not inside the manifest itself) so a reader can detect a manifest that changed after the build was validated.
+
+Consumers reject a generation with missing required files, missing required keys, or broken ID references before indexing, retrieval, or evaluation.
 
 ## Cross-file invariants
 

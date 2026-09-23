@@ -35,7 +35,7 @@ The model follows a source record through preparation, retrieval, and evaluation
 8. Under the default policy, a published document has at least one retained query. A query excluded for missing answer/evidence or a configured gold-passage cap receives a reasoned audit record.
 9. Ranking scores are finite numbers; every ranked passage is in the query's candidate set and the number of ranked passages does not exceed `top_k`.
 10. Each evaluation report uses one judgment set and one cutoff list for every run. A judged query missing from a run contributes zero and increments `queries_missing`.
-11. Each complete Qwen build contains exactly `manifest.chunks` normalized, nonzero, finite `vector(1024)` values. `Indexed Chunk` is bijective with the published corpus: no missing, duplicate, or foreign chunk IDs.
+11. Each complete Qwen build contains exactly as many normalized, nonzero, finite `vector(1024)` rows as the generation manifest's `summary.chunks` counter. `Indexed Chunk` is bijective with the published corpus: no missing, duplicate, or foreign chunk IDs.
 12. Retrieval filters indexed chunks by the pinned build ID, the question's source document, and its published candidate IDs before exact pgvector cosine-distance ordering. Returned IDs are checked against the candidate set. No approximate ANN index is used in this iteration.
 13. An active build must have a matching generation ID and manifest checksum, model ID/revision, text profile, Qwen query instruction, dimension, normalization, and PostgreSQL row count. A mismatched or incomplete build is not usable.
 14. Only the Qwen model may create an index in this iteration. The schema includes `model_id` to avoid collisions when additional models are explicitly added later.
