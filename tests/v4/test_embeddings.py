@@ -343,3 +343,50 @@ def test_usage_is_a_snapshot(fake_vllm) -> None:
     embedder.embed_passages(["texto"])
 
     assert before.requests == 0 and embedder.usage.requests == 1
+
+
+# --- FR-026: operator-declared tunnel-local hosts (T043) ---------------------
+
+
+def test_a_declared_tunnel_host_may_use_plain_http(monkeypatch) -> None:
+    monkeypatch.setenv("V4_EMBEDDING_TUNNEL_HOSTS", "10.8.0.1, vllm.wg.internal")
+
+    assert validate_endpoint("http://10.8.0.1:8000/v1") == "http://10.8.0.1:8000/v1"
+    assert validate_endpoint("http://VLLM.wg.internal/v1") == "http://VLLM.wg.internal/v1"
+
+
+def test_an_undeclared_host_is_still_rejected_beside_declared_ones(monkeypatch) -> None:
+    monkeypatch.setenv("V4_EMBEDDING_TUNNEL_HOSTS", "10.8.0.1")
+
+    with pytest.raises(EndpointConfigurationError, match="V4_EMBEDDING_TUNNEL_HOSTS"):
+        validate_endpoint("http://10.8.0.2:8000/v1")
+
+
+def test_without_the_declaration_private_addresses_are_rejected(monkeypatch) -> None:
+    monkeypatch.delenv("V4_EMBEDDING_TUNNEL_HOSTS", raising=False)
+
+    with pytest.raises(EndpointConfigurationError):
+        validate_endpoint("http://10.8.0.1:8000/v1")
+
+
+def test_a_declared_host_does_not_relax_https_verification(monkeypatch) -> None:
+    monkeypatch.setenv("V4_EMBEDDING_TUNNEL_HOSTS", "vllm.example.org")
+
+    with pytest.raises(EndpointConfigurationError, match="certificate"):
+        validate_endpoint("https://vllm.example.org/v1", verify_tls=False)
+
+
+def test_a_declared_host_still_rejects_embedded_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("V4_EMBEDDING_TUNNEL_HOSTS", "10.8.0.1")
+
+    with pytest.raises(EndpointConfigurationError, match="credentials"):
+        validate_endpoint("http://user:secret@10.8.0.1/v1")
+
+
+def test_a_declared_tunnel_host_is_checked_before_any_request(fake_vllm, monkeypatch) -> None:
+    port = fake_vllm.server.server_address[1]
+    monkeypatch.setenv("V4_EMBEDDING_TUNNEL_HOSTS", "10.99.99.99")
+
+    with pytest.raises(EndpointConfigurationError):
+        RemoteEmbedder(f"http://0.0.0.0:{port}/v1")
+    assert fake_vllm.requests == []

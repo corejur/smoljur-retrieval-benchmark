@@ -1,7 +1,7 @@
 """Charts of mean retrieval metrics from a metrics.py comparison report.
 
     python -m scripts.v4.plots REPORT_JSON OUTPUT_PNG
-        [--metrics NDCG MAP Recall P MRR] [--k-values 1 3 5 10]
+        [--metrics NDCG MAP Recall P MRR Pass] [--k-values 1 3 5 10]
 
 Every value in a comparison report is already a mean over the judged
 questions (missing ones counted as zero), so the chart reads the report and
@@ -22,8 +22,8 @@ from typing import Any, Mapping, Sequence
 __all__ = ["FAMILIES", "metric_means", "plot_metric_means", "main"]
 
 #: Metric families in display order, as named in the report's metric keys.
-FAMILIES: tuple[str, ...] = ("NDCG", "MAP", "Recall", "P", "MRR")
-_TITLES = {"P": "Precision"}
+FAMILIES: tuple[str, ...] = ("NDCG", "MAP", "Recall", "P", "MRR", "Pass")
+_TITLES = {"P": "Precision", "Pass": "Pass@k (hit rate)"}
 
 #: Categorical series colors in fixed order, validated for color-vision
 #: deficiency on the light surface. A run is never given a generated hue.
@@ -52,10 +52,21 @@ def metric_means(
     """Arrange the report's per-run means as family -> cutoff -> run -> value."""
     loaded = _load(report)
     runs = loaded.get("models") or []
-    chosen_families = list(families or FAMILIES)
-    unknown = [f for f in chosen_families if f not in FAMILIES]
+    unknown = [f for f in families or () if f not in FAMILIES]
     if unknown:
         raise ValueError(f"unknown metric families {unknown}; choose from {list(FAMILIES)}")
+    # Families the report actually carries: reports written before a family
+    # existed (Pass@k) still plot, just without that panel.
+    reported = {
+        name.split("@", 1)[0] for run in runs for name in run.get("metrics") or {}
+    }
+    if families:
+        absent = [f for f in families if runs and f not in reported]
+        if absent:
+            raise ValueError(f"families {absent} are not in the report; re-run metrics.py")
+        chosen_families = list(families)
+    else:
+        chosen_families = [f for f in FAMILIES if not runs or f in reported]
     available = [int(k) for k in loaded.get("k_values") or []]
     chosen_k = [int(k) for k in (k_values or available)]
     missing_k = [k for k in chosen_k if k not in available]
@@ -193,7 +204,9 @@ def main() -> None:
     )
     parser.add_argument("report", type=Path, help="Comparison report from metrics.py --output")
     parser.add_argument("output", type=Path, help="PNG to write")
-    parser.add_argument("--metrics", nargs="+", choices=FAMILIES, help="Families to plot (default: all)")
+    parser.add_argument(
+        "--metrics", nargs="+", choices=FAMILIES, help="Families to plot (default: all in the report)"
+    )
     parser.add_argument("--k-values", type=int, nargs="+", help="Cutoffs to plot (default: the report's)")
     parser.add_argument("--title", help="Override the chart title")
     args = parser.parse_args()

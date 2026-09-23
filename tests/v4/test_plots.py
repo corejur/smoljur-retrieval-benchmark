@@ -128,3 +128,28 @@ def test_a_run_file_given_instead_of_a_report_is_explained(tmp_path: Path, monke
 
     assert "run file" in capsys.readouterr().err
     assert not (tmp_path / "m.png").exists()
+
+
+def _with_pass(report: dict) -> dict:
+    for run in report["models"]:
+        run["metrics"].update({f"Pass@{k}": 0.9 for k in report["k_values"]})
+    return report
+
+
+def test_pass_at_k_gets_its_own_panel_when_the_report_has_it() -> None:
+    means = metric_means(_with_pass(_report(("qwen", 0.5))))
+
+    assert list(means) == ["NDCG", "MAP", "Recall", "P", "MRR", "Pass"]
+    assert means["Pass"][10] == {"qwen": 0.9}
+
+
+def test_a_report_from_before_pass_at_k_still_plots(tmp_path: Path) -> None:
+    report = _report(("qwen", 0.5))  # no Pass@k keys
+
+    assert "Pass" not in metric_means(report)
+    assert plot_metric_means(report, tmp_path / "m.png").read_bytes()[:8] == PNG_SIGNATURE
+
+
+def test_asking_for_a_family_the_report_lacks_is_explained() -> None:
+    with pytest.raises(ValueError, match="Pass.*not in the report"):
+        metric_means(_report(("qwen", 0.5)), families=["Pass"])

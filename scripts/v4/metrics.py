@@ -167,7 +167,11 @@ def evaluate_run(
     model: str,
     k_values: Iterable[int] = DEFAULT_K_VALUES,
 ) -> ModelScores:
-    """Score one run against the qrels with BEIR's evaluator plus MRR."""
+    """Score one run against the qrels with BEIR's evaluator plus MRR and Pass@k.
+
+    Pass@k is the share of judged questions with at least one relevant
+    passage in the top k — a hit rate. Missing questions count as misses.
+    """
     from beir.retrieval.evaluation import EvaluateRetrieval
 
     ks = sorted(set(k_values))
@@ -191,17 +195,31 @@ def evaluate_run(
     for group in (ndcg, _map, recall, precision):
         metrics.update({key: round(float(value), 5) for key, value in group.items()})
 
-    for k in ks:
-        total = 0.0
-        for query_id, relevant in qrels.items():
-            ranked = sorted(
-                scored.get(query_id, {}).items(), key=lambda item: -item[1]
-            )[:k]
-            total += _reciprocal_rank(
-                [chunk_id for chunk_id, _ in ranked],
-                {c for c, score in relevant.items() if score > 0},
+    # Rank once per query, breaking score ties as trec_eval does (higher ID
+    # first), so MRR and Pass@k agree with NDCG/MAP/Recall/P on every tie.
+    rankings = {
+        query_id: [
+            chunk_id
+            for chunk_id, _ in sorted(
+                scored.get(query_id, {}).items(), key=lambda item: (item[1], item[0]), reverse=True
             )
-        metrics[f"MRR@{k}"] = round(total / len(qrels), 5)
+        ]
+        for query_id in qrels
+    }
+    relevant_sets = {
+        query_id: {c for c, score in judged.items() if score > 0}
+        for query_id, judged in qrels.items()
+    }
+    for k in ks:
+        reciprocal = hits = 0.0
+        for query_id, ranked in rankings.items():
+            top = ranked[:k]
+            relevant = relevant_sets[query_id]
+            reciprocal += _reciprocal_rank(top, relevant)
+            # Pass@k: did any relevant passage make the top k?
+            hits += any(chunk_id in relevant for chunk_id in top)
+        metrics[f"MRR@{k}"] = round(reciprocal / len(qrels), 5)
+        metrics[f"Pass@{k}"] = round(hits / len(qrels), 5)
 
     return ModelScores(
         model=model,

@@ -79,6 +79,7 @@ scripts/
 │   ├── embeddings.py           # Planned trusted remote vLLM adapter
 │   ├── pgvector_store.py       # Planned PostgreSQL/pgvector store and exact search
 │   ├── index.py                # Planned Qwen pgvector build and activation
+│   ├── plots.py                # Mean-metric charts from a metrics comparison report
 │   └── sql/
 │       └── 001_vector_schema.sql   # Planned idempotent pgvector migration
 ├── artifact_publication.py     # Existing shared legacy publisher

@@ -35,6 +35,7 @@ import numpy as np
 
 __all__ = [
     "API_KEY_ENV",
+    "TUNNEL_HOSTS_ENV",
     "CHUNK_TEXT_PROFILE",
     "DIMENSION",
     "QUERY_INSTRUCTION",
@@ -51,6 +52,13 @@ __all__ = [
 QWEN_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"
 DIMENSION = 1024
 API_KEY_ENV = "V4_EMBEDDING_API_KEY"
+
+#: Comma-separated hosts the operator declares as tunnel-local: the local end
+#: of an encrypted tunnel they established (a WireGuard/VPN interface
+#: address, say). Plain http to these is allowed; to any other non-loopback
+#: host it is not. The declaration is the operator's statement that the
+#: channel is encrypted — the code cannot observe the tunnel itself.
+TUNNEL_HOSTS_ENV = "V4_EMBEDDING_TUNNEL_HOSTS"
 
 #: Versioned query instruction, in the Qwen model-card format. Changing it
 #: makes every existing index build incompatible, by design.
@@ -132,12 +140,18 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+def _declared_tunnel_hosts() -> frozenset[str]:
+    raw = os.environ.get(TUNNEL_HOSTS_ENV, "")
+    return frozenset(host.strip().lower() for host in raw.split(",") if host.strip())
+
+
 def validate_endpoint(base_url: str, *, verify_tls: bool = True) -> str:
     """Return `base_url` if it satisfies FR-026, else raise.
 
     Accepted: `https://` with certificate verification, or plain `http://`
-    to a loopback address. Everything else — plaintext to any other host,
-    disabled verification, embedded credentials — is refused.
+    to a loopback address or to a host the operator declared tunnel-local in
+    `V4_EMBEDDING_TUNNEL_HOSTS`. Everything else — plaintext to any other
+    host, disabled verification, embedded credentials — is refused.
     """
     parts = urlsplit(base_url)
     if parts.scheme not in {"http", "https"} or not parts.hostname:
@@ -158,11 +172,12 @@ def validate_endpoint(base_url: str, *, verify_tls: bool = True) -> str:
                 "embedding endpoint"
             )
         return base_url
-    if not _is_loopback(host):
+    if not _is_loopback(host) and host.lower() not in _declared_tunnel_hosts():
         raise EndpointConfigurationError(
             f"plaintext http to {host} would send source text unencrypted; use "
-            "https, or reach the server through a loopback tunnel "
-            "(e.g. ssh -L 8000:localhost:8000 host, then http://127.0.0.1:8000/v1)"
+            "https, reach the server through a loopback tunnel "
+            "(e.g. ssh -L 8000:localhost:8000 host, then http://127.0.0.1:8000/v1), "
+            f"or declare {host} tunnel-local in {TUNNEL_HOSTS_ENV}"
         )
     return base_url
 

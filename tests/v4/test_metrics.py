@@ -140,7 +140,7 @@ def test_two_runs_share_one_qrels_set_and_the_same_cutoffs(tmp_path: Path) -> No
     for item in scores:
         assert set(item.metrics) == {
             f"{name}@{k}"
-            for name in ("NDCG", "MAP", "Recall", "P", "MRR")
+            for name in ("NDCG", "MAP", "Recall", "P", "MRR", "Pass")
             for k in (1, 3)
         }
     by_model = {item.model: item.metrics for item in scores}
@@ -359,3 +359,50 @@ def test_the_cli_writes_a_complete_report_outside_the_runs_directory(
     assert [entry["model"] for entry in report["models"]] == ["qwen_top1", "qwen_top3"]
     assert report["k_values"] == [1, 3]
     assert not list(output.parent.glob(".*tmp"))
+
+
+# --- pass@k ------------------------------------------------------------------
+
+
+def test_pass_at_k_is_the_share_of_questions_with_a_hit_in_the_top_k(tmp_path: Path) -> None:
+    qrels = load_qrels(_qrels_file(tmp_path))  # q1 -> {c1, c2}; q2 -> {c5}
+    run = {
+        "q1": {"c9": 3.0, "c2": 2.0, "c1": 1.0},  # first hit at rank 2
+        "q2": {"c8": 3.0, "c7": 2.0, "c6": 1.0},  # no hit at all
+    }
+
+    metrics = evaluate_run(qrels, run, model="x", k_values=[1, 2, 3]).metrics
+
+    assert metrics["Pass@1"] == 0.0
+    assert metrics["Pass@2"] == 0.5
+    assert metrics["Pass@3"] == 0.5
+
+
+def test_pass_at_k_counts_a_missing_judged_question_as_a_miss(tmp_path: Path) -> None:
+    qrels = load_qrels(_qrels_file(tmp_path))
+
+    metrics = evaluate_run(qrels, {"q1": {"c1": 1.0}}, model="x", k_values=[10]).metrics
+
+    assert metrics["Pass@10"] == 0.5
+
+
+def test_pass_at_k_ignores_zero_relevance_judgments(tmp_path: Path) -> None:
+    path = tmp_path / "qrels.tsv"
+    path.write_text("query-id\tcorpus-id\tscore\nq1\tc1\t0\nq1\tc2\t1\n", encoding="utf-8")
+
+    metrics = evaluate_run(load_qrels(path), {"q1": {"c1": 2.0}}, model="x", k_values=[1]).metrics
+
+    assert metrics["Pass@1"] == 0.0
+
+
+def test_ties_follow_trec_eval_like_the_other_metrics(tmp_path: Path) -> None:
+    qrels = load_qrels(_qrels_file(tmp_path))
+    # Equal scores: trec_eval (and so NDCG/MAP here) ranks the higher ID
+    # first, so c9 takes rank 1 ahead of the relevant c1 — in either order.
+    for q1 in ({"c1": 1.0, "c9": 1.0}, {"c9": 1.0, "c1": 1.0}):
+        metrics = evaluate_run(
+            qrels, {"q1": q1, "q2": {"c5": 1.0}}, model="x", k_values=[1]
+        ).metrics
+        assert metrics["Pass@1"] == 0.5
+        assert metrics["MRR@1"] == 0.5
+        assert metrics["P@1"] == 0.5

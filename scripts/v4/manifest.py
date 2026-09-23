@@ -15,7 +15,8 @@ __all__ = ["VALID", "REUSED", "EXCLUDED", "REPOSITORY_ROOT", "verify"]
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 
-#: Modules written for v4. Every one is part of the build.
+#: Files written for v4 — Python modules and other build artifacts such as SQL
+#: migrations. Every one is part of the build.
 VALID: tuple[str, ...] = (
     "scripts/v4/__init__.py",
     "scripts/v4/manifest.py",
@@ -33,6 +34,7 @@ VALID: tuple[str, ...] = (
     "scripts/v4/pgvector_store.py",
     "scripts/v4/index.py",
     "scripts/v4/plots.py",
+    "scripts/v4/sql/001_vector_schema.sql",
     "scripts/v4/metrics.py",
     "scripts/v4/retrieve.py",
     "scripts/v4/run.py",
@@ -41,7 +43,6 @@ VALID: tuple[str, ...] = (
 #: v1-v3 modules the v4 pipeline still depends on, unchanged.
 REUSED: dict[str, str] = {
     "scripts/source_normalization.py": "one HTML parse yielding text and citation spans",
-    "scripts/persistence.py": "atomic file writes",
     "scripts/strategies/chunking/legal_recursive.py": (
         "structure-aware chunk splitting; extended with an optional is_heading "
         "hook that defaults to the v1-v3 rules, so v1-v3 output is unchanged"
@@ -81,8 +82,11 @@ def verify(root: Path | None = None) -> list[ManifestProblem]:
     package = base / "scripts" / "v4"
     if package.is_dir():
         declared = set(VALID)
-        for path in sorted(package.glob("*.py")):
+        for path in sorted(package.rglob("*")):
             relative = path.relative_to(base).as_posix()
+            # Bytecode caches are generated, never part of the build.
+            if not path.is_file() or "__pycache__" in path.parts:
+                continue
             if relative not in declared:
                 problems.append(ManifestProblem(relative, "present but undeclared"))
     overlap = set(REUSED) & set(EXCLUDED)

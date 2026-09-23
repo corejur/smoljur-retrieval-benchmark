@@ -144,7 +144,7 @@ As a researcher, I want ranking runs scored against the same relevance judgments
 - **FR-013**: The initial index and retrieval workflow MUST use only `Qwen/Qwen3-Embedding-0.6B` for scoring questions against candidate passages and MUST produce a ranking run that can be evaluated separately. The index layout MUST distinguish model identities so later models cannot overwrite this index.
 - **FR-014**: Retrieval MUST reject a question without candidates or a candidate that is absent from the published passages with an identifiable error.
 - **FR-015**: Evaluation MUST score each ranking run against the same published relevance judgments and the same selected result-depth cutoffs.
-- **FR-016**: Evaluation MUST report ranking quality using normalized discounted cumulative gain, mean average precision, recall, precision, and mean reciprocal rank at each selected cutoff.
+- **FR-016**: Evaluation MUST report ranking quality using normalized discounted cumulative gain, mean average precision, recall, precision, mean reciprocal rank, and pass@k (the share of questions with a relevant passage in the top k) at each selected cutoff.
 - **FR-017**: Evaluation MUST treat judged questions absent from a ranking run as zero-scoring questions and report their count.
 - **FR-018**: Evaluation MUST reject empty or malformed ranking runs and runs with no judged question in common, identifying the unusable input.
 - **FR-019**: Evaluation MUST present separate comparable results for at least two ranking runs in one comparison.
