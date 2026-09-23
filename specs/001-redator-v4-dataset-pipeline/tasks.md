@@ -14,8 +14,8 @@ description: "Dependency-ordered implementation tasks for the Representative Red
 
 **Purpose**: Declare direct v4 dependencies and provision only the local storage service; do not start a real remote model or change v1–v3 code.
 
-- [ ] T001 [P] Add direct v4 dependencies for `tiktoken`, a PostgreSQL client, and its pgvector adaptation to `pyproject.toml`; keep Python >=3.9 compatibility and do not add FAISS as a v4 requirement.
-- [ ] T002 [P] Add a pinned pgvector-enabled PostgreSQL service, health check, persistent named volume, and environment-supplied credentials to `compose.yaml`; do not hard-code passwords or provision the trusted remote vLLM server.
+- [X] T001 [P] Add direct v4 dependencies for `tiktoken`, a PostgreSQL client, and its pgvector adaptation to `pyproject.toml`; keep Python >=3.9 compatibility and do not add FAISS as a v4 requirement.
+- [X] T002 [P] Add a pinned pgvector-enabled PostgreSQL service, health check, persistent named volume, and environment-supplied credentials to `compose.yaml`; do not hard-code passwords or provision the trusted remote vLLM server.
 
 **Checkpoint**: The Python environment can install direct dependencies, and the local PostgreSQL service can be started without embedding any credentials in the repository.
 
@@ -25,8 +25,8 @@ description: "Dependency-ordered implementation tasks for the Representative Red
 
 **Purpose**: Provide one immutable-generation identity and reader contract shared by preparation, publication, indexing, and evaluation.
 
-- [ ] T003 Add failing tests in `tests/v4/test_generation.py` for a generation manifest (`meta/manifest.json` — not the `scripts/v4/manifest.py` module registry; see the plan's Structure Decision naming note) with `pipeline='redator-v4'`, split `test`, generation ID, source SHA-256, row count, summary counts, required file paths, and a single resolved snapshot; reject missing files, broken references, or mixed generation IDs.
-- [ ] T004 Implement the tested generation-manifest schema, required-artifact enumeration, cross-file ID/count validation, and one-time `current` snapshot resolution in `scripts/v4/generation.py`; leave `scripts/v4/manifest.py` as the module registry and do not merge the two concepts; preserve query, qrel, candidate, document, and passage identities from the existing v4 output.
+- [X] T003 Add failing tests in `tests/v4/test_generation.py` for a generation manifest (`meta/manifest.json` — not the `scripts/v4/manifest.py` module registry; see the plan's Structure Decision naming note) with `pipeline='redator-v4'`, split `test`, generation ID, source SHA-256, row count, summary counts, required file paths, and a single resolved snapshot; reject missing files, broken references, or mixed generation IDs.
+- [X] T004 Implement the tested generation-manifest schema, required-artifact enumeration, cross-file ID/count validation, and one-time `current` snapshot resolution in `scripts/v4/generation.py`; leave `scripts/v4/manifest.py` as the module registry and do not merge the two concepts; preserve query, qrel, candidate, document, and passage identities from the existing v4 output.
 
 **Checkpoint**: A complete synthetic generation validates as one snapshot; corrupt or internally inconsistent artifacts fail before a consumer starts.
 
@@ -40,15 +40,15 @@ description: "Dependency-ordered implementation tasks for the Representative Red
 
 ### Tests for User Story 1
 
-- [ ] T005 [P] [US1] Add failing production-source contract tests in `tests/v4/test_source_contract.py` for required CSV columns `id`, `data`, `question_texts`, `output`; unique nonempty document IDs; ordered equal-length JSON arrays; split `test`; 1,000 rows; and SHA-256 `d10d21f2074e48576cb715bc65ef01a36f369bf837dd2c404280775cef56fff3`, with an injectable fixture fingerprint for portable tests; include a `-test`-named file with altered bytes and a train/validation-named file carrying the expected bytes, proving the SHA-256 is the authoritative gate and the filename is advisory only.
-- [ ] T006 [P] [US1] Add dataset-integrity regression and missing-contract cases in `tests/v4/test_run.py` for stable `{document_id}:q{zero_based_answer_index}` IDs, ordered token-bounded passages, one maximum-overlap passage per accepted citation (earlier passage wins ties), nonempty candidate sets from the source document, and positive-score qrels referencing only published candidate chunks.
+- [X] T005 [P] [US1] Add failing production-source contract tests in `tests/v4/test_source_contract.py` for required CSV columns `id`, `data`, `question_texts`, `output`; unique nonempty document IDs; ordered equal-length JSON arrays; split `test`; 1,000 rows; and SHA-256 `d10d21f2074e48576cb715bc65ef01a36f369bf837dd2c404280775cef56fff3`, with an injectable fixture fingerprint for portable tests; include a `-test`-named file with altered bytes and a train/validation-named file carrying the expected bytes, proving the SHA-256 is the authoritative gate and the filename is advisory only.
+- [X] T006 [P] [US1] Add dataset-integrity regression and missing-contract cases in `tests/v4/test_run.py` for stable `{document_id}:q{zero_based_answer_index}` IDs, ordered token-bounded passages, one maximum-overlap passage per accepted citation (earlier passage wins ties), nonempty candidate sets from the source document, and positive-score qrels referencing only published candidate chunks.
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Implement streaming v4 test-source header, row-count, SHA-256, split, and duplicate-ID validation in `scripts/v4/source_contract.py`; the production gate must reject train/validation and altered input while the lower-level builder remains usable with the synthetic fixture.
-- [ ] T008 [US1] Wire the production source gate into `scripts/v4/run.py`, fix the production split to `test`, retain the existing `o200k_base` 512-token max/320 target/64 overlap profile, and record every required generation-manifest key from the [dataset contract](contracts/dataset.md) in `meta/manifest.json` — `pipeline`, `split`, `generation_id`, `generated_at`, `source_sha256`, `source_row_count`, the chunking and policy block, and the full `summary` counter object including `summary.chunks`.
-- [ ] T009 [US1] Enforce the [dataset contract](contracts/dataset.md) in `scripts/v4/generation.py`: unique corpus/query IDs, one candidate record and at least one qrel per retained query, qrels contained in its candidate set, candidate/document provenance, half-open passage offsets, and manifest counts matching emitted records.
-- [ ] T010 [US1] Call generation validation before considering a build successful in `scripts/v4/run.py`; keep source-evidence labels independent of model inference and preserve the synthetic fixture's expected 2 documents, 2 passages, 2 retained questions, and 2 judgments.
+- [X] T007 [US1] Implement streaming v4 test-source header, row-count, SHA-256, split, and duplicate-ID validation in `scripts/v4/source_contract.py`; the production gate must reject train/validation and altered input while the lower-level builder remains usable with the synthetic fixture.
+- [X] T008 [US1] Wire the production source gate into `scripts/v4/run.py`, fix the production split to `test`, retain the existing `o200k_base` 512-token max/320 target/64 overlap profile, and record every required generation-manifest key from the [dataset contract](contracts/dataset.md) in `meta/manifest.json` — `pipeline`, `split`, `generation_id`, `generated_at`, `source_sha256`, `source_row_count`, the chunking and policy block, and the full `summary` counter object including `summary.chunks`.
+- [X] T009 [US1] Enforce the [dataset contract](contracts/dataset.md) in `scripts/v4/generation.py`: unique corpus/query IDs, one candidate record and at least one qrel per retained query, qrels contained in its candidate set, candidate/document provenance, half-open passage offsets, and manifest counts matching emitted records.
+- [X] T010 [US1] Call generation validation before considering a build successful in `scripts/v4/run.py`; keep source-evidence labels independent of model inference and preserve the synthetic fixture's expected 2 documents, 2 passages, 2 retained questions, and 2 judgments.
 
 **Checkpoint**: User Story 1 passes its fixture tests and the real test-source preflight; no train or validation row can enter a production generation.
 

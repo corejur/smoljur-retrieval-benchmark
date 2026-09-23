@@ -1,0 +1,43 @@
+# Local storage service for the v4 Representative Redator pipeline.
+#
+# This file provisions ONLY the local PostgreSQL/pgvector database. The trusted
+# remote vLLM embedding service is operator-supplied and deliberately not
+# defined here (see specs/001-redator-v4-dataset-pipeline/plan.md).
+#
+# Credentials come from the environment, never from this file. Export
+# V4_POSTGRES_PASSWORD or put it in a local .env before starting the service:
+#
+#   export V4_POSTGRES_PASSWORD="$(openssl rand -base64 24)"
+#   docker compose up -d postgres
+
+name: redator-v4
+
+services:
+  postgres:
+    # Pinned: the pgvector extension must match the server major version.
+    image: pgvector/pgvector:pg16
+    container_name: redator-v4-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${V4_POSTGRES_DB:-redator_v4}
+      POSTGRES_USER: ${V4_POSTGRES_USER:-redator}
+      # `:?` fails the command when unset, so the service cannot start with a
+      # default or empty password.
+      POSTGRES_PASSWORD: ${V4_POSTGRES_PASSWORD:?set V4_POSTGRES_PASSWORD in the environment or a local .env file}
+    ports:
+      - "${V4_POSTGRES_PORT:-5432}:5432"
+    volumes:
+      # Named volume: embeddings and build provenance must survive a restart.
+      - redator-v4-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "${V4_POSTGRES_USER:-redator}" -d "${V4_POSTGRES_DB:-redator_v4}"
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  redator-v4-pgdata:
+    name: redator-v4-pgdata

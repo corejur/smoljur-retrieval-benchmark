@@ -47,6 +47,14 @@ peft = ["peft"]
 llm2vec = ["llm2vec"]
 dev = ["pytest", "pytest-cov", "pre-commit"]
 faiss = ["faiss-cpu"]
+# Direct dependencies of the v4 Representative Redator pipeline (scripts/v4).
+# Declared explicitly rather than relied on transitively; FAISS is deliberately
+# absent because pgvector is the sole v4 vector store.
+v4 = [
+    "tiktoken>=0.7",        # o200k_base token counts for chunking
+    "psycopg[binary]>=3.1", # PostgreSQL client
+    "pgvector>=0.2.5",      # vector(1024) adaptation for psycopg
+]
 
 [project.urls]
 Homepage = "https://github.com/beir-cellar/beir"

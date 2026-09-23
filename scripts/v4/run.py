@@ -20,8 +20,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import secrets
 import sys
 from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
@@ -29,13 +31,34 @@ from scripts.artifact_publication import publish_generation
 from scripts.strategies.chunking.legal_recursive import ChunkingConfig, LengthCounter
 from scripts.v4.chunking import ENCODING_NAME, V4_CHUNKING, chunk_cleaned_document, o200k_counter
 from scripts.v4.cleaning import plain_text_violations
+from scripts.v4.generation import validate_generation
 from scripts.v4.ground_truth import map_citations_to_chunks, prepare_document
 from scripts.v4.questions import read_questions
+from scripts.v4.source_contract import (
+    PRODUCTION_SPLIT,
+    V4_TEST_ROW_COUNT,
+    V4_TEST_SHA256,
+    SourceFingerprint,
+    iter_source_rows,
+    verify_source_file,
+)
 from scripts.v4.streams import JsonlWriter, TsvWriter
 
-__all__ = ["RunSummary", "build_dataset", "run", "iter_csv_rows"]
+__all__ = [
+    "RunSummary",
+    "build_dataset",
+    "new_generation_id",
+    "run",
+    "iter_csv_rows",
+]
 
 MANAGED_DIRECTORIES = ("beir", "documents", "evidence", "audits", "meta")
+
+
+def new_generation_id() -> str:
+    """A sortable, unique identity for one published generation."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"{stamp}-{secrets.token_hex(3)}"
 
 
 @dataclass(frozen=True)
@@ -73,8 +96,15 @@ def build_dataset(
     max_citation_words: int | None = None,
     keep_documents_without_queries: bool = False,
     max_gold_chunks: int | None = 10,
+    fingerprint: SourceFingerprint | None = None,
+    generation_id: str | None = None,
 ) -> RunSummary:
-    """Write one complete generation into `output_directory`."""
+    """Write one complete generation into `output_directory`.
+
+    `fingerprint` carries the gated source's provenance. A production build
+    always supplies one; a synthetic-fixture build does not, and records an
+    empty source SHA-256 to say so.
+    """
     output = Path(output_directory)
     citation_limit = (
         config.max_words if max_citation_words is None else max_citation_words
@@ -310,6 +340,10 @@ def build_dataset(
             {
                 "pipeline": "redator-v4",
                 "split": split,
+                "generation_id": generation_id or new_generation_id(),
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "source_sha256": fingerprint.sha256 if fingerprint else "",
+                "source_row_count": fingerprint.row_count if fingerprint else rows,
                 "chunking": asdict(config),
                 "length_unit": "o200k_base_tokens",
                 "relevance": "one_chunk_per_citation_by_maximum_overlap",
@@ -344,10 +378,23 @@ def run(
     output_directory: str | Path,
     **kwargs: Any,
 ) -> RunSummary:
-    """Build off-path and publish the generation, rolling back on failure."""
+    """Build off-path and publish the generation, rolling back on failure.
+
+    The generation is validated against the dataset contract *before* it is
+    considered successful, so a build that emits inconsistent artifacts rolls
+    back instead of replacing a good generation with a broken one.
+    """
+
+    def build(staging: Path) -> RunSummary:
+        summary = build_dataset(source_rows, staging, **kwargs)
+        # Staged output is not yet at generations/<generation-id>/, so its
+        # directory name is not the identity. T017 publishes it there.
+        validate_generation(staging, check_directory_identity=False)
+        return summary
+
     return publish_generation(
         output_directory,
-        lambda staging: build_dataset(source_rows, staging, **kwargs),
+        build,
         managed_directories=MANAGED_DIRECTORIES,
     )
 
@@ -356,7 +403,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source_csv", type=Path)
     parser.add_argument("output_directory", type=Path)
-    parser.add_argument("--split", default="test")
+    # No --split: this feature publishes only the test split, and accepting a
+    # value here is how a train or validation build would slip through.
+    parser.add_argument(
+        "--source-sha256",
+        default=V4_TEST_SHA256,
+        help="Expected source fingerprint; override only for the synthetic fixture",
+    )
+    parser.add_argument(
+        "--source-rows",
+        type=int,
+        default=V4_TEST_ROW_COUNT,
+        help="Expected source row count; override only for the synthetic fixture",
+    )
     parser.add_argument("--max-words", type=int, default=V4_CHUNKING.max_words)
     parser.add_argument("--target-words", type=int, default=V4_CHUNKING.target_words)
     parser.add_argument("--overlap-words", type=int, default=V4_CHUNKING.overlap_words)
@@ -385,10 +444,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # The gate runs before a single row is read: a train/validation name is
+    # refused outright, and altered bytes fail the fingerprint.
+    fingerprint = verify_source_file(
+        args.source_csv,
+        expected_sha256=args.source_sha256,
+        expected_row_count=args.source_rows,
+    )
+
     summary = run(
-        iter_csv_rows(args.source_csv),
+        iter_source_rows(fingerprint.path),
         args.output_directory,
-        split=args.split,
+        split=PRODUCTION_SPLIT,
+        fingerprint=fingerprint,
         require_answer_text=not args.allow_missing_answer,
         max_citation_words=args.max_citation_words,
         keep_documents_without_queries=args.keep_query_less_documents,

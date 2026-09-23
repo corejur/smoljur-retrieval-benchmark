@@ -140,3 +140,4 @@ dmypy.json
 
 # Local materialized dataset
 datasets/representative-redator-2k-v1-v3/
+datasets/redator_v4_repr-test_1k-val_2k-train_rest/

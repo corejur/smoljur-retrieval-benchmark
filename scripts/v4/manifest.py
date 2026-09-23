@@ -26,6 +26,8 @@ VALID: tuple[str, ...] = (
     "scripts/v4/ground_truth.py",
     "scripts/v4/streams.py",
     "scripts/v4/headings.py",
+    "scripts/v4/source_contract.py",
+    "scripts/v4/generation.py",
     "scripts/v4/metrics.py",
     "scripts/v4/retrieve.py",
     "scripts/v4/run.py",

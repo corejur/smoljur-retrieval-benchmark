@@ -389,3 +389,122 @@ def test_the_cap_can_be_disabled(tmp_path: Path) -> None:
 
     queries = {item["_id"] for item in _read(tmp_path / "beir" / "queries.jsonl")}
     assert "doc-many:q0" in queries
+
+
+# --- T006: dataset-integrity contract regressions ---------------------------
+
+
+def test_query_ids_use_the_zero_based_answer_index(tmp_path: Path) -> None:
+    """A query ID is {document_id}:q{index of its answer in the source}."""
+    build_dataset(_rows(), tmp_path)
+    queries = _read(tmp_path / "beir" / "queries.jsonl")
+    assert {q["_id"] for q in queries} == {"doc-a:q0", "doc-c:q0"}
+
+
+def test_dropping_a_question_does_not_renumber_the_later_ones(tmp_path: Path) -> None:
+    """Position is identity: q1 stays q1 even when q0 is dropped."""
+    rows = [
+        _row(
+            "doc-d",
+            ["Pergunta sem citacao?", "Quem e o autor?"],
+            [
+                {"answer": "Nao", "citations": []},
+                {"answer": "Joao da Silva", "citations": ["p-0"]},
+            ],
+        )
+    ]
+    build_dataset(rows, tmp_path)
+    queries = _read(tmp_path / "beir" / "queries.jsonl")
+    assert [q["_id"] for q in queries] == ["doc-d:q1"]
+
+
+def test_passages_are_ordered_and_contiguous_within_a_document(tmp_path: Path) -> None:
+    build_dataset(_rows(), tmp_path)
+    corpus = _read(tmp_path / "beir" / "corpus.jsonl")
+    by_document: dict[str, list[int]] = {}
+    for record in corpus:
+        meta = record["metadata"]
+        by_document.setdefault(meta["document_id"], []).append(meta["chunk_index"])
+    for document_id, indexes in by_document.items():
+        assert indexes == sorted(indexes), f"{document_id} emitted out of order"
+        assert indexes == list(range(len(indexes))), f"{document_id} has a gap"
+
+
+def test_passage_offsets_are_a_half_open_interval(tmp_path: Path) -> None:
+    build_dataset(_rows(), tmp_path)
+    for record in _read(tmp_path / "beir" / "corpus.jsonl"):
+        meta = record["metadata"]
+        assert 0 <= meta["start_offset"] < meta["end_offset"]
+
+
+def test_qrels_carry_a_positive_score_and_only_published_candidates(tmp_path: Path) -> None:
+    build_dataset(_rows(), tmp_path)
+    corpus_ids = {r["_id"] for r in _read(tmp_path / "beir" / "corpus.jsonl")}
+    candidates = {
+        r["query_id"]: set(r["candidate_ids"])
+        for r in _read(tmp_path / "beir" / "candidates" / "test.jsonl")
+    }
+    lines = (tmp_path / "beir" / "qrels" / "test.tsv").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "query-id\tcorpus-id\tscore"
+    assert len(lines) > 1
+    for line in lines[1:]:
+        query_id, chunk_id, score = line.split("\t")
+        assert int(score) > 0
+        assert chunk_id in corpus_ids, f"{chunk_id} is judged but not published"
+        assert chunk_id in candidates[query_id], f"{chunk_id} is judged but not a candidate"
+
+
+def test_candidate_sets_are_nonempty_and_from_the_source_document(tmp_path: Path) -> None:
+    build_dataset(_rows(), tmp_path)
+    corpus = {r["_id"]: r["metadata"]["document_id"] for r in _read(tmp_path / "beir" / "corpus.jsonl")}
+    for record in _read(tmp_path / "beir" / "candidates" / "test.jsonl"):
+        assert record["candidate_ids"], f"{record['query_id']} has no candidates"
+        for chunk_id in record["candidate_ids"]:
+            assert corpus[chunk_id] == record["document_id"]
+
+
+# --- T010: the generation is validated before it is called successful -------
+
+
+def test_the_synthetic_fixture_builds_its_expected_generation(tmp_path: Path) -> None:
+    """contracts/fixture-v4.csv: 2 documents, 2 passages, 2 queries, 2 qrels."""
+    from scripts.v4.source_contract import file_sha256, iter_source_rows, verify_source_file
+
+    fixture = Path("specs/001-redator-v4-dataset-pipeline/contracts/fixture-v4.csv")
+    fingerprint = verify_source_file(
+        fixture, expected_sha256=file_sha256(fixture), expected_row_count=2
+    )
+    output = tmp_path / "out"
+    summary = run(iter_source_rows(fixture), output, fingerprint=fingerprint)
+
+    assert summary.documents == 2
+    assert summary.chunks == 2
+    assert summary.queries_retained == 2
+    assert summary.qrels == 2
+
+    manifest = json.loads((output / "meta" / "manifest.json").read_text())
+    assert manifest["source_sha256"] == fingerprint.sha256
+    assert manifest["source_row_count"] == 2
+    assert manifest["summary"]["chunks"] == 2
+
+
+def test_an_inconsistent_generation_is_not_published(tmp_path: Path, monkeypatch) -> None:
+    """Validation failure must roll back rather than publish broken artifacts."""
+    import pytest
+
+    from scripts.v4 import run as run_module
+    from scripts.v4.generation import GenerationError
+
+    output = tmp_path / "out"
+    run(_rows(), output)
+    before = (output / "beir" / "corpus.jsonl").read_text(encoding="utf-8")
+
+    def _reject(*_args, **_kwargs):
+        raise GenerationError("synthetic contract violation")
+
+    monkeypatch.setattr(run_module, "validate_generation", _reject)
+    with pytest.raises(GenerationError):
+        run(_rows(), output)
+
+    # The previous generation is untouched.
+    assert (output / "beir" / "corpus.jsonl").read_text(encoding="utf-8") == before
