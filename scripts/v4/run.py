@@ -69,6 +69,7 @@ class RunSummary:
     chunks: int
     queries: int
     queries_retained: int
+    dropped_queries: int
     qrels: int
     unmapped_citations: int
     plain_text_violations: int
@@ -110,7 +111,8 @@ def build_dataset(
         config.max_words if max_citation_words is None else max_citation_words
     )
     rows = documents = chunk_total = queries = evaluable = qrels = 0
-    rejected = unmapped_total = impure = 0
+    rejected = dropped = unmapped_total = impure = 0
+    seen_documents: set[str] = set()
 
     with (
         JsonlWriter(output / "beir" / "corpus.jsonl") as corpus,
@@ -131,6 +133,34 @@ def build_dataset(
         for index, row in enumerate(source_rows):
             rows += 1
             source = read_questions(row)
+            # A repeated ID would collide with the first row's query and
+            # passage IDs, so the later row is rejected whole. Its questions
+            # are not audited by ID: those IDs belong to the first row.
+            if source.document_id in seen_documents:
+                rejected += 1
+                rejected_file.write(
+                    {
+                        "source_row": index,
+                        "document_id": source.document_id,
+                        "reason": "duplicate_document_id",
+                    }
+                )
+                continue
+            if source.document_id:
+                seen_documents.add(source.document_id)
+
+            for blank in source.dropped:
+                queries += 1
+                dropped += 1
+                dropped_file.write(
+                    {
+                        "query_id": blank.query_id,
+                        "document_id": blank.document_id,
+                        "question_index": blank.question_index,
+                        "reason": blank.reason,
+                    }
+                )
+
             if not source.valid:
                 rejected += 1
                 rejected_file.write(
@@ -214,10 +244,12 @@ def build_dataset(
                 if reason is None:
                     kept.append((item, citation_chunks))
                     continue
+                dropped += 1
                 dropped_file.write(
                     {
                         "query_id": item.query.query_id,
                         "document_id": source.document_id,
+                        "question_index": item.query.question_index,
                         "reference_answer": item.query.reference_answer,
                         "citations": list(item.query.citations),
                         "gold_chunks": len({e.chunk_id for e in citation_chunks}),
@@ -329,6 +361,7 @@ def build_dataset(
         chunks=chunk_total,
         queries=queries,
         queries_retained=evaluable,
+        dropped_queries=dropped,
         qrels=qrels,
         unmapped_citations=unmapped_total,
         plain_text_violations=impure,

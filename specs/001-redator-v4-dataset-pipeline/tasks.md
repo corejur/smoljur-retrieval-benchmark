@@ -62,14 +62,14 @@ description: "Dependency-ordered implementation tasks for the Representative Red
 
 ### Tests for User Story 2
 
-- [ ] T011 [P] [US2] Add failing question-level cases in `tests/v4/test_questions.py` for blank questions audited at their original answer position, unchanged later query IDs, unreadable `question_texts`/`output`, and unequal array lengths.
-- [ ] T012 [P] [US2] Add failing source/query audit cases in `tests/v4/test_audits.py` for duplicate IDs, empty cleaned documents, no passages, missing answer text, missing or unmapped citations, `max_gold_chunks=10` by default, and whole-document exclusion only when no question remains usable.
+- [X] T011 [P] [US2] Add failing question-level cases in `tests/v4/test_questions.py` for blank questions audited at their original answer position, unchanged later query IDs, unreadable `question_texts`/`output`, and unequal array lengths.
+- [X] T012 [P] [US2] Add failing source/query audit cases in `tests/v4/test_audits.py` for duplicate IDs, empty cleaned documents, no passages, missing answer text, missing or unmapped citations, `max_gold_chunks=10` by default, and whole-document exclusion only when no question remains usable.
 
 ### Implementation for User Story 2
 
-- [ ] T013 [US2] Extend `scripts/v4/questions.py` to expose blank-question drops with `{document_id}:q{original_index}` rather than silently skipping them, while retaining ordered `question_texts` and `output` alignment.
-- [ ] T014 [US2] Emit identified, reason-coded rejected-source, dropped-query, unmapped-citation, and cleaning audit records in `scripts/v4/run.py`; retain a document with at least one valid question, exclude one with none under the default policy, and reconcile exclusion counters with the manifest.
-- [ ] T015 [US2] Ensure the audit JSONL writers in `scripts/v4/streams.py` preserve one valid record per line and flush/close on both success and failure so audits can be validated with the rest of the generation.
+- [X] T013 [US2] Extend `scripts/v4/questions.py` to expose blank-question drops with `{document_id}:q{original_index}` rather than silently skipping them, while retaining ordered `question_texts` and `output` alignment.
+- [X] T014 [US2] Emit identified, reason-coded rejected-source, dropped-query, unmapped-citation, and cleaning audit records in `scripts/v4/run.py`; retain a document with at least one valid question, exclude one with none under the default policy, and reconcile exclusion counters with the manifest.
+- [X] T015 [US2] Ensure the audit JSONL writers in `scripts/v4/streams.py` preserve one valid record per line and flush/close on both success and failure so audits can be validated with the rest of the generation.
 
 **Checkpoint**: Every fixture exclusion is attributable to an original source row or question ID and a specific reason; valid sibling questions remain published.
 

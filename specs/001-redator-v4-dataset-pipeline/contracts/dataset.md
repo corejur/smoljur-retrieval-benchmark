@@ -66,7 +66,12 @@ The examples show required fields; additional documented metadata may be present
 
 `documents/documents.jsonl` contains `document_id` and full cleaned `text`. `evidence/evidence.jsonl` contains `query_id`, `document_id`, and citation spans with source offsets, cleaned-text offsets, and mapped `chunk_id` when available. Offsets use a half-open interval `[start, end)` into the corresponding normalized or cleaned document text.
 
-Audits are line-delimited objects with source or query identity and a specific reason. `rejected_sources.jsonl` is for whole-source rejection; `dropped_queries.jsonl` is for question exclusion; `unmapped_citations.jsonl` includes citation identity and mapping failure reason; `cleaning_events.jsonl` and `plain_text_violations.jsonl` explain transformations or residual quality problems. A blank question receives a dropped-query audit instead of disappearing silently.
+Audits are line-delimited objects with source or query identity and a specific reason. `rejected_sources.jsonl` is for whole-source rejection; `dropped_queries.jsonl` is for question exclusion; `unmapped_citations.jsonl` includes citation identity and mapping failure reason; `cleaning_events.jsonl` and `plain_text_violations.jsonl` explain transformations or residual quality problems. A blank question receives a dropped-query audit instead of disappearing silently. A later row repeating an earlier `id` is rejected whole as `duplicate_document_id`; the first row keeps the identity. Dropped-query records carry `question_index`, the original answer position, so a drop never renumbers later questions.
+
+| Audit | Reason codes |
+|---|---|
+| `rejected_sources` | `missing_document_id`, `duplicate_document_id`, `question_texts_unreadable`, `output_unreadable`, `question_answer_count_mismatch:<questions>!=<answers>`, `no_usable_questions`, `empty_document_after_cleaning`, `no_chunks_produced`, `no_retained_queries` |
+| `dropped_queries` | `blank_question`, `answer_has_no_text`, `answer_has_no_citations`, `all_citations_unmapped`, `no_chunk_holds_the_evidence`, `too_many_gold_chunks` |
 
 `meta/manifest.json` is the generation manifest. These keys are required; a consumer that cannot read one rejects the generation. Additional documented keys may be present.
 
@@ -82,7 +87,7 @@ Audits are line-delimited objects with source or query identity and a specific r
 | `relevance`, `citation_filter`, `corpus_text`, `max_citation_words`, `max_gold_chunks`, `document_filter`, `query_filter` | The label policy in force for this generation. |
 | `summary` | Counter object; see below. |
 
-`summary` carries the counters and **must** contain `source_rows`, `rejected_sources`, `documents`, `chunks`, `queries`, `queries_retained`, `qrels`, `unmapped_citations`, and `plain_text_violations`. Every counter must agree exactly with the emitted artifacts.
+`summary` carries the counters and **must** contain `source_rows`, `rejected_sources`, `documents`, `chunks`, `queries`, `queries_retained`, `qrels`, `unmapped_citations`, and `plain_text_violations`. Every counter must agree exactly with the emitted artifacts: `rejected_sources`, `unmapped_citations`, and `plain_text_violations` equal the line counts of their audit files, and `source_rows` equals `documents + rejected_sources`. The additional counter `dropped_queries` equals the line count of `audits/dropped_queries.jsonl`, and `queries` equals `queries_retained` plus that line count, so every source row and question is either published or audited.
 
 Two of these are load-bearing beyond this contract. **`summary.chunks` is the completeness contract for an index build** — the published corpus chunk count that [model-index.md](model-index.md) requires a build's PostgreSQL row count to equal; it is nested under `summary`, not a top-level `chunks` key. **`generation_manifest_sha256`** is the SHA-256 over this file's serialized bytes, recorded by an index build (not inside the manifest itself) so a reader can detect a manifest that changed after the build was validated.
 

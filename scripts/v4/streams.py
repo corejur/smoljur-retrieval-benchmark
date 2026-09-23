@@ -39,24 +39,37 @@ class _AtomicTextWriter:
         traceback: TracebackType | None,
     ) -> None:
         if exc_type is None:
-            self._handle.flush()
-            os.fsync(self._handle.fileno())
-            self._handle.close()
-            os.replace(self._temporary, self.path)
+            try:
+                self._handle.flush()
+                os.fsync(self._handle.fileno())
+                self._handle.close()
+                os.replace(self._temporary, self.path)
+            except BaseException:
+                self._discard()
+                raise
             return
-        self._handle.close()
+        self._discard()
+
+    def _discard(self) -> None:
+        """Close and remove the temporary file; the destination is untouched."""
         try:
-            os.unlink(self._temporary)
-        except FileNotFoundError:
-            pass
+            self._handle.close()
+        finally:
+            try:
+                os.unlink(self._temporary)
+            except FileNotFoundError:
+                pass
 
 
 class JsonlWriter(_AtomicTextWriter):
     """Write one JSON object per line, atomically on clean exit."""
 
     def write(self, record: Mapping[str, Any]) -> None:
-        json.dump(record, self._handle, ensure_ascii=False)
-        self._handle.write("\n")
+        # Serialize the whole record before touching the file, so a record
+        # that cannot be encoded leaves no partial line. NaN and Infinity are
+        # not JSON and would make the line unreadable to a strict parser.
+        line = json.dumps(record, ensure_ascii=False, allow_nan=False)
+        self._handle.write(line + "\n")
         self.count += 1
 
     def extend(self, records: Iterable[Mapping[str, Any]]) -> None:
@@ -73,7 +86,12 @@ class TsvWriter(_AtomicTextWriter):
         self._handle.write("\t".join(self.fieldnames) + "\n")
 
     def write(self, record: Mapping[str, Any]) -> None:
-        self._handle.write(
-            "\t".join(str(record[name]) for name in self.fieldnames) + "\n"
-        )
+        values = [str(record[name]) for name in self.fieldnames]
+        for name, value in zip(self.fieldnames, values):
+            if any(separator in value for separator in "\t\r\n"):
+                raise ValueError(
+                    f"{self.path.name}: {name} value {value!r} contains a tab or "
+                    "line break and would split the row"
+                )
+        self._handle.write("\t".join(values) + "\n")
         self.count += 1

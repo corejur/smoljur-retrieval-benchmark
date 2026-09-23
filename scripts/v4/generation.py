@@ -335,16 +335,46 @@ def validate_generation(
             "score every model zero"
         )
 
-    for counter, observed, where in (
+    audits = {
+        name: sum(1 for _ in _read_jsonl(root / "audits" / f"{name}.jsonl"))
+        for name in ("rejected_sources", "dropped_queries", "unmapped_citations", "plain_text_violations")
+    }
+    reconciled = [
         ("chunks", len(corpus_ids), "beir/corpus.jsonl"),
         ("queries_retained", len(query_ids), "beir/queries.jsonl"),
         ("documents", len(documents), "documents/documents.jsonl"),
         ("qrels", len(qrels), f"beir/qrels/{parsed.split}.tsv"),
-    ):
+        *(
+            (name, count, f"audits/{name}.jsonl")
+            for name, count in audits.items()
+            if name in parsed.summary
+        ),
+    ]
+    for counter, observed, where in reconciled:
         declared = int(parsed.summary[counter])
         if declared != observed:
             raise GenerationError(
                 f"summary.{counter} is {declared} but {where} holds {observed} records"
+            )
+
+    # Every source row and every question is accounted for: published or
+    # audited, never silently lost.
+    for counter, observed, accounting in (
+        (
+            "source_rows",
+            len(documents) + audits["rejected_sources"],
+            "documents plus rejected sources",
+        ),
+        (
+            "queries",
+            len(query_ids) + audits["dropped_queries"],
+            "retained plus dropped queries",
+        ),
+    ):
+        declared = int(parsed.summary[counter])
+        if declared != observed:
+            raise GenerationError(
+                f"summary.{counter} is {declared} but {accounting} total {observed}"
             )
 
     return parsed

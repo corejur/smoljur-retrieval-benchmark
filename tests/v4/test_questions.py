@@ -91,3 +91,47 @@ def test_preserves_a_null_reference_answer_that_still_has_citations() -> None:
 def test_reference_answer_is_none_when_absent() -> None:
     source = read_questions(_row(["Pergunta?"], [{"citations": []}]))
     assert source.records[0].reference_answer is None
+
+
+def test_a_blank_question_is_dropped_at_its_original_position() -> None:
+    source = read_questions(
+        _row(
+            ["Quem e o autor?", "   ", "Qual o valor?"],
+            [
+                {"answer": "Joao", "citations": ["p-0"]},
+                {"answer": "x", "citations": ["p-1"]},
+                {"answer": "10", "citations": ["p-2"]},
+            ],
+        )
+    )
+
+    assert source.valid
+    assert [record.query_id for record in source.records] == ["doc-1:q0", "doc-1:q2"]
+    assert [(drop.query_id, drop.question_index, drop.reason) for drop in source.dropped] == [
+        ("doc-1:q1", 1, "blank_question")
+    ]
+
+
+def test_a_source_of_only_blank_questions_is_rejected_with_its_drops() -> None:
+    source = read_questions(_row(["", "  \n "], [{"citations": []}, {"citations": []}]))
+
+    assert source.rejected_reason == "no_usable_questions"
+    assert [drop.query_id for drop in source.dropped] == ["doc-1:q0", "doc-1:q1"]
+    assert {drop.reason for drop in source.dropped} == {"blank_question"}
+
+
+def test_rejects_unreadable_output() -> None:
+    row = _row(["Quem?"], [])
+    row["output"] = "{not json"
+
+    source = read_questions(row)
+
+    assert source.rejected_reason == "output_unreadable"
+    assert source.dropped == ()
+
+
+def test_unequal_arrays_reject_the_source_without_question_drops() -> None:
+    source = read_questions(_row(["Uma?", "", "Tres?"], [{"citations": []}]))
+
+    assert source.rejected_reason == "question_answer_count_mismatch:3!=1"
+    assert source.records == () and source.dropped == ()

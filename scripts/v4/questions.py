@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
-__all__ = ["QueryRecord", "SourceQuestions", "read_questions"]
+__all__ = ["DroppedQuestion", "QueryRecord", "SourceQuestions", "read_questions"]
 
 _TRAILING_BOILERPLATE = re.compile(
     r"(?is)[\s.;:]*(?:"
@@ -43,10 +43,23 @@ class QueryRecord:
 
 
 @dataclass(frozen=True)
+class DroppedQuestion:
+    """A question excluded before evidence mapping, at its original position."""
+
+    document_id: str
+    question_index: int
+    query_id: str
+    reason: str
+
+
+@dataclass(frozen=True)
 class SourceQuestions:
     document_id: str
     records: tuple[QueryRecord, ...]
     rejected_reason: str | None = None
+    #: Questions dropped while reading. Their indices are not reused, so a
+    #: later question keeps the ID of its answer position.
+    dropped: tuple[DroppedQuestion, ...] = ()
 
     @property
     def valid(self) -> bool:
@@ -142,9 +155,15 @@ def read_questions(
         )
 
     records: list[QueryRecord] = []
+    dropped: list[DroppedQuestion] = []
     for index, (question, answer) in enumerate(zip(questions, answers)):
         text = normalize_query_text(question)
         if not text:
+            dropped.append(
+                DroppedQuestion(
+                    document_id, index, f"{document_id}:q{index}", "blank_question"
+                )
+            )
             continue
         records.append(
             QueryRecord(
@@ -157,5 +176,7 @@ def read_questions(
             )
         )
     if not records:
-        return SourceQuestions(document_id, (), "no_usable_questions")
-    return SourceQuestions(document_id, tuple(records))
+        return SourceQuestions(
+            document_id, (), "no_usable_questions", tuple(dropped)
+        )
+    return SourceQuestions(document_id, tuple(records), dropped=tuple(dropped))
