@@ -16,7 +16,10 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import os
+import secrets
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Mapping
 
@@ -28,6 +31,8 @@ __all__ = [
     "REQUIRED_SUMMARY_KEYS",
     "load_generation",
     "manifest_sha256",
+    "new_generation_id",
+    "pin_generation_path",
     "read_manifest",
     "required_artifacts",
     "resolve_current",
@@ -42,6 +47,9 @@ PRODUCTION_SPLIT = "test"
 
 CURRENT = "current"
 GENERATIONS = "generations"
+#: Prefix of a generation that is still being built. `resolve_current` never
+#: accepts it, so an interrupted build cannot be activated by accident.
+BUILDING_PREFIX = ".building-"
 MANIFEST = "meta/manifest.json"
 
 #: Top-level generation-manifest keys, per contracts/dataset.md.
@@ -229,9 +237,9 @@ def validate_generation(
     that set, passage provenance and offsets, and the manifest counters
     against the records actually emitted.
 
-    `check_directory_identity` is False while a build is still staged under a
-    working directory. Once T017 publishes into `generations/<generation-id>/`
-    the directory *is* the identity and this stays True.
+    `check_directory_identity` is False only while a build is still staged
+    under `generations/.building-<id>/`. Once published into
+    `generations/<generation-id>/` the directory *is* the identity.
     """
     root = Path(generation_root)
     parsed = read_manifest(root)
@@ -388,6 +396,12 @@ def _reject_duplicates(identifiers: list[str], what: str) -> None:
         seen.add(identifier)
 
 
+def new_generation_id() -> str:
+    """A sortable, unique identity for one published generation."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"{stamp}-{secrets.token_hex(3)}"
+
+
 def resolve_current(dataset_root: str | Path) -> Path:
     """Resolve `current` once, to the immutable generation it points at.
 
@@ -397,12 +411,51 @@ def resolve_current(dataset_root: str | Path) -> Path:
     """
     root = Path(dataset_root)
     pointer = root / CURRENT
-    if not pointer.exists():
-        raise GenerationError(f"dataset root has no {CURRENT} reference: {pointer}")
-    resolved = pointer.resolve()
+    if not pointer.is_symlink():
+        raise GenerationError(
+            f"dataset root has no {CURRENT} reference: {pointer}"
+            + (" (it exists but is not a symlink)" if pointer.exists() else "")
+        )
+    # One readlink: the target is fixed from here on, whatever happens next.
+    target = Path(os.readlink(pointer))
+    resolved = (root / target).resolve() if not target.is_absolute() else target.resolve()
+    generations = (root / GENERATIONS).resolve()
+    if resolved.parent != generations or resolved.name.startswith("."):
+        raise GenerationError(
+            f"{CURRENT} points at {target}, which is not a published generation "
+            f"directly under {generations}"
+        )
     if not resolved.is_dir():
-        raise GenerationError(f"{CURRENT} does not point at a directory: {resolved}")
+        raise GenerationError(f"{CURRENT} points at a missing generation: {resolved}")
     return resolved
+
+
+def pin_generation_path(path: str | Path) -> Path:
+    """Pin a path inside a dataset to one validated, immutable generation.
+
+    `path` may run through `current` (`<root>/current/beir`) or name a
+    published generation directly (`<root>/generations/<id>/beir/...`). The
+    `current` reference is resolved exactly once; the returned path never
+    passes through it, so a later publication cannot change what it names.
+    The generation is validated before the path is returned.
+    """
+    absolute = Path(os.path.abspath(path))
+    for ancestor in (absolute, *absolute.parents):
+        if ancestor.name == CURRENT and ancestor.is_symlink():
+            generation = resolve_current(ancestor.parent)
+            validate_generation(generation)
+            return generation / absolute.relative_to(ancestor)
+    resolved = absolute.resolve()
+    for ancestor in (resolved, *resolved.parents):
+        if ancestor.parent.name == GENERATIONS and (ancestor / MANIFEST).is_file():
+            if ancestor.name.startswith("."):
+                raise GenerationError(f"{ancestor} is an unpublished build")
+            validate_generation(ancestor)
+            return resolved
+    raise GenerationError(
+        f"{path} is not inside a published generation (expected "
+        f"<root>/{CURRENT}/... or <root>/{GENERATIONS}/<generation-id>/...)"
+    )
 
 
 def load_generation(dataset_root: str | Path) -> tuple[Path, GenerationManifest]:

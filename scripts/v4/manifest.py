@@ -28,6 +28,7 @@ VALID: tuple[str, ...] = (
     "scripts/v4/headings.py",
     "scripts/v4/source_contract.py",
     "scripts/v4/generation.py",
+    "scripts/v4/publication.py",
     "scripts/v4/metrics.py",
     "scripts/v4/retrieve.py",
     "scripts/v4/run.py",
@@ -37,7 +38,6 @@ VALID: tuple[str, ...] = (
 REUSED: dict[str, str] = {
     "scripts/source_normalization.py": "one HTML parse yielding text and citation spans",
     "scripts/persistence.py": "atomic file writes",
-    "scripts/artifact_publication.py": "staged publication with rollback",
     "scripts/strategies/chunking/legal_recursive.py": (
         "structure-aware chunk splitting; extended with an optional is_heading "
         "hook that defaults to the v1-v3 rules, so v1-v3 output is unchanged"
@@ -46,6 +46,10 @@ REUSED: dict[str, str] = {
 
 #: v1-v3 modules the v4 pipeline replaces. Not imported by anything in v4.
 EXCLUDED: dict[str, str] = {
+    "scripts/artifact_publication.py": (
+        "scripts/v4/publication.py; the shared publisher swaps managed "
+        "directories one at a time, so readers can see a mixed generation"
+    ),
     "scripts/prepare_dataset.py": "scripts/v4/run.py",
     "scripts/citation_ground_truth.py": "scripts/v4/ground_truth.py",
     "scripts/data_cleaner.py": "scripts/v4/cleaning.py",

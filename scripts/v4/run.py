@@ -20,19 +20,18 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import secrets
 import sys
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
-from scripts.artifact_publication import publish_generation
 from scripts.strategies.chunking.legal_recursive import ChunkingConfig, LengthCounter
 from scripts.v4.chunking import ENCODING_NAME, V4_CHUNKING, chunk_cleaned_document, o200k_counter
 from scripts.v4.cleaning import plain_text_violations
-from scripts.v4.generation import validate_generation
+from scripts.v4.generation import new_generation_id
 from scripts.v4.ground_truth import map_citations_to_chunks, prepare_document
+from scripts.v4.publication import Published, publish
 from scripts.v4.questions import read_questions
 from scripts.v4.source_contract import (
     PRODUCTION_SPLIT,
@@ -51,14 +50,6 @@ __all__ = [
     "run",
     "iter_csv_rows",
 ]
-
-MANAGED_DIRECTORIES = ("beir", "documents", "evidence", "audits", "meta")
-
-
-def new_generation_id() -> str:
-    """A sortable, unique identity for one published generation."""
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    return f"{stamp}-{secrets.token_hex(3)}"
 
 
 @dataclass(frozen=True)
@@ -410,26 +401,19 @@ def run(
     source_rows: Iterable[Mapping[str, Any]],
     output_directory: str | Path,
     **kwargs: Any,
-) -> RunSummary:
-    """Build off-path and publish the generation, rolling back on failure.
+) -> Published[RunSummary]:
+    """Build a new immutable generation and make it `current` atomically.
 
-    The generation is validated against the dataset contract *before* it is
-    considered successful, so a build that emits inconsistent artifacts rolls
-    back instead of replacing a good generation with a broken one.
+    The v4 publisher validates the generation against the dataset contract
+    before switching `current`, so a failed or inconsistent build leaves the
+    active generation untouched. The shared v1-v3 publisher is not used.
     """
+    generation_id = kwargs.pop("generation_id", None)
 
-    def build(staging: Path) -> RunSummary:
-        summary = build_dataset(source_rows, staging, **kwargs)
-        # Staged output is not yet at generations/<generation-id>/, so its
-        # directory name is not the identity. T017 publishes it there.
-        validate_generation(staging, check_directory_identity=False)
-        return summary
+    def build(staging: Path, identity: str) -> RunSummary:
+        return build_dataset(source_rows, staging, generation_id=identity, **kwargs)
 
-    return publish_generation(
-        output_directory,
-        build,
-        managed_directories=MANAGED_DIRECTORIES,
-    )
+    return publish(output_directory, build, generation_id=generation_id)
 
 
 def main() -> None:
@@ -485,7 +469,7 @@ def main() -> None:
         expected_row_count=args.source_rows,
     )
 
-    summary = run(
+    published = run(
         iter_source_rows(fingerprint.path),
         args.output_directory,
         split=PRODUCTION_SPLIT,
@@ -504,10 +488,17 @@ def main() -> None:
             minimum_words=args.minimum_words,
         ),
     )
+    summary = published.summary
+    superseded = (
+        f", superseding {published.previous_generation_id}"
+        if published.previous_generation_id
+        else ""
+    )
     print(
+        f"generation {published.generation_id} is current{superseded}: "
         f"{summary.documents} documents, {summary.chunks} chunks, "
         f"{summary.queries_retained}/{summary.queries} queries retained, "
-        f"{summary.qrels} qrels -> {args.output_directory} "
+        f"{summary.qrels} qrels -> {published.path} "
         f"({summary.rejected_sources} sources rejected, "
         f"{summary.unmapped_citations} citations unmapped, "
         f"{summary.plain_text_violations} documents with residual markup)"

@@ -195,10 +195,14 @@ def test_manifest_records_the_query_filter(tmp_path: Path) -> None:
 
 
 def test_publishes_with_rollback(tmp_path: Path) -> None:
+    from scripts.v4.generation import resolve_current
+
     output = tmp_path / "out"
-    run(_rows(), output, split="test")
-    assert (output / "beir" / "corpus.jsonl").is_file()
-    assert json.loads((output / "meta" / "manifest.json").read_text())["pipeline"] == "redator-v4"
+    published = run(_rows(), output, split="test")
+    generation = resolve_current(output)
+    assert generation == published.path.resolve()
+    assert (generation / "beir" / "corpus.jsonl").is_file()
+    assert json.loads((generation / "meta" / "manifest.json").read_text())["pipeline"] == "redator-v4"
 
 
 def test_beir_loader_still_reads_the_extended_query_rows(tmp_path: Path) -> None:
@@ -475,14 +479,16 @@ def test_the_synthetic_fixture_builds_its_expected_generation(tmp_path: Path) ->
         fixture, expected_sha256=file_sha256(fixture), expected_row_count=2
     )
     output = tmp_path / "out"
-    summary = run(iter_source_rows(fixture), output, fingerprint=fingerprint)
+    published = run(iter_source_rows(fixture), output, fingerprint=fingerprint)
+    summary = published.summary
 
     assert summary.documents == 2
     assert summary.chunks == 2
     assert summary.queries_retained == 2
     assert summary.qrels == 2
 
-    manifest = json.loads((output / "meta" / "manifest.json").read_text())
+    manifest = json.loads((published.path / "meta" / "manifest.json").read_text())
+    assert manifest["generation_id"] == published.generation_id
     assert manifest["source_sha256"] == fingerprint.sha256
     assert manifest["source_row_count"] == 2
     assert manifest["summary"]["chunks"] == 2
@@ -492,19 +498,20 @@ def test_an_inconsistent_generation_is_not_published(tmp_path: Path, monkeypatch
     """Validation failure must roll back rather than publish broken artifacts."""
     import pytest
 
-    from scripts.v4 import run as run_module
-    from scripts.v4.generation import GenerationError
+    from scripts.v4 import publication
+    from scripts.v4.generation import GenerationError, resolve_current
 
     output = tmp_path / "out"
-    run(_rows(), output)
-    before = (output / "beir" / "corpus.jsonl").read_text(encoding="utf-8")
+    first = run(_rows(), output)
+    before = (first.path / "beir" / "corpus.jsonl").read_text(encoding="utf-8")
 
     def _reject(*_args, **_kwargs):
         raise GenerationError("synthetic contract violation")
 
-    monkeypatch.setattr(run_module, "validate_generation", _reject)
+    monkeypatch.setattr(publication, "validate_generation", _reject)
     with pytest.raises(GenerationError):
         run(_rows(), output)
 
-    # The previous generation is untouched.
-    assert (output / "beir" / "corpus.jsonl").read_text(encoding="utf-8") == before
+    # The previous generation is untouched and still current.
+    assert resolve_current(output) == first.path.resolve()
+    assert (first.path / "beir" / "corpus.jsonl").read_text(encoding="utf-8") == before

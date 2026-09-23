@@ -83,13 +83,13 @@ description: "Dependency-ordered implementation tasks for the Representative Red
 
 ### Tests for User Story 3
 
-- [ ] T016 [US3] Add failing failure-injection and concurrent-reader tests in `tests/v4/test_publication.py` for `building -> validated -> active -> superseded`, rollback to the previous active generation, and no mixture of `beir/`, `documents/`, `evidence/`, `audits/`, or `meta/` files during a successful switch.
+- [X] T016 [US3] Add failing failure-injection and concurrent-reader tests in `tests/v4/test_publication.py` for `building -> validated -> active -> superseded`, rollback to the previous active generation, and no mixture of `beir/`, `documents/`, `evidence/`, `audits/`, or `meta/` files during a successful switch.
 
 ### Implementation for User Story 3
 
-- [ ] T017 [US3] Implement a v4-only immutable `generations/<generation-id>/` publisher and single atomic `current` reference switch in `scripts/v4/publication.py`; validate complete artifacts before activation and never replace managed directories sequentially.
-- [ ] T018 [US3] Replace the v4 call to shared `scripts/artifact_publication.py` with the v4 publisher in `scripts/v4/run.py`; leave the shared v1–v3 publication behavior untouched and report the active generation ID and counts.
-- [ ] T019 [US3] Make consumers pin `current` once and reject missing/incompatible generation files in `scripts/v4/generation.py`; keep superseded generations available until a separately defined cleanup policy exists.
+- [X] T017 [US3] Implement a v4-only immutable `generations/<generation-id>/` publisher and single atomic `current` reference switch in `scripts/v4/publication.py`; validate complete artifacts before activation and never replace managed directories sequentially.
+- [X] T018 [US3] Replace the v4 call to shared `scripts/artifact_publication.py` with the v4 publisher in `scripts/v4/run.py`; leave the shared v1–v3 publication behavior untouched and report the active generation ID and counts.
+- [X] T019 [US3] Make consumers pin `current` once and reject missing/incompatible generation files in `scripts/v4/generation.py`; keep superseded generations available until a separately defined cleanup policy exists.
 
 **Checkpoint**: One stable generation snapshot survives failed and successful rebuilds without cross-generation reads.
 

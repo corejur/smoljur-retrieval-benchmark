@@ -20,6 +20,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol, Sequence
 
+from scripts.v4.generation import pin_generation_path
+
 __all__ = [
     "Encoder",
     "HttpEmbeddingEncoder",
@@ -254,7 +256,10 @@ def main() -> None:
     parser.add_argument("--format", choices=("json", "trec"), default="json")
     args = parser.parse_args()
 
-    beir = args.beir_directory
+    # Resolve `current` once and validate that generation: every file below
+    # is read from this immutable snapshot even if a rebuild publishes a new
+    # one mid-run.
+    beir = pin_generation_path(args.beir_directory)
     corpus = load_corpus(beir / "corpus.jsonl", use_title=not args.no_title)
     queries = load_queries(beir / "queries.jsonl")
     candidates = load_candidates(beir / "candidates" / f"{args.split}.jsonl")
