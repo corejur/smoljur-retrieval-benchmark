@@ -54,6 +54,7 @@ v4 = [
     "tiktoken>=0.7",        # o200k_base token counts for chunking
     "psycopg[binary]>=3.1", # PostgreSQL client
     "pgvector>=0.2.5",      # vector(1024) adaptation for psycopg
+    "matplotlib>=3.5",      # scripts/v4/plots.py mean-metric charts
 ]
 
 [project.urls]

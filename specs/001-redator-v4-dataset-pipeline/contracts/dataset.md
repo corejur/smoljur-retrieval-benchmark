@@ -71,7 +71,7 @@ Audits are line-delimited objects with source or query identity and a specific r
 | Audit | Reason codes |
 |---|---|
 | `rejected_sources` | `missing_document_id`, `duplicate_document_id`, `question_texts_unreadable`, `output_unreadable`, `question_answer_count_mismatch:<questions>!=<answers>`, `no_usable_questions`, `empty_document_after_cleaning`, `no_chunks_produced`, `no_retained_queries` |
-| `dropped_queries` | `blank_question`, `answer_has_no_text`, `answer_has_no_citations`, `all_citations_unmapped`, `no_chunk_holds_the_evidence`, `too_many_gold_chunks` |
+| `dropped_queries` | `blank_question`, `question_exceeds_max_tokens` (with `query_tokens`), `answer_has_no_text`, `answer_has_no_citations`, `all_citations_unmapped`, `no_chunk_holds_the_evidence`, `too_many_gold_chunks` |
 
 `meta/manifest.json` is the generation manifest. These keys are required; a consumer that cannot read one rejects the generation. Additional documented keys may be present.
 
@@ -84,7 +84,7 @@ Audits are line-delimited objects with source or query identity and a specific r
 | `source_sha256` | SHA-256 of the test CSV, as above. |
 | `source_row_count` | Row count of that CSV (1,000 in production). |
 | `chunking` | Chunk profile object, with `length_unit` and `length_unit_encoding` naming the tokenizer. |
-| `relevance`, `citation_filter`, `corpus_text`, `max_citation_words`, `max_gold_chunks`, `document_filter`, `query_filter` | The label policy in force for this generation. |
+| `relevance`, `citation_filter`, `corpus_text`, `max_citation_words`, `max_gold_chunks`, `max_query_tokens`, `document_filter`, `query_filter` | The label policy in force for this generation. |
 | `summary` | Counter object; see below. |
 
 `summary` carries the counters and **must** contain `source_rows`, `rejected_sources`, `documents`, `chunks`, `queries`, `queries_retained`, `qrels`, `unmapped_citations`, and `plain_text_violations`. Every counter must agree exactly with the emitted artifacts: `rejected_sources`, `unmapped_citations`, and `plain_text_violations` equal the line counts of their audit files, and `source_rows` equals `documents + rejected_sources`. The additional counter `dropped_queries` equals the line count of `audits/dropped_queries.jsonl`, and `queries` equals `queries_retained` plus that line count, so every source row and question is either published or audited.

@@ -44,12 +44,20 @@ from scripts.v4.source_contract import (
 from scripts.v4.streams import JsonlWriter, TsvWriter
 
 __all__ = [
+    "DEFAULT_MAX_QUERY_TOKENS",
     "RunSummary",
     "build_dataset",
     "new_generation_id",
     "run",
     "iter_csv_rows",
+    "query_token_overflow",
 ]
+
+#: Longest question kept, in o200k_base tokens: the same unit and cap as a
+#: passage. Longer "questions" in the source are embedded task prompts (lists
+#: of hundreds of lawyers or categories to match against), not retrieval
+#: queries, and overflow the embedding server's context window.
+DEFAULT_MAX_QUERY_TOKENS = 512
 
 
 @dataclass(frozen=True)
@@ -76,6 +84,19 @@ def iter_csv_rows(path: str | Path) -> Iterator[dict[str, str]]:
         yield from reader
 
 
+def query_token_overflow(
+    text: str, max_tokens: int | None, counter: LengthCounter
+) -> int | None:
+    """The question's token count when it exceeds `max_tokens`, else None.
+
+    `max_tokens=None` disables the limit.
+    """
+    if max_tokens is None:
+        return None
+    tokens = counter.count(text)
+    return tokens if tokens > max_tokens else None
+
+
 def build_dataset(
     source_rows: Iterable[Mapping[str, Any]],
     output_directory: str | Path,
@@ -88,6 +109,7 @@ def build_dataset(
     max_citation_words: int | None = None,
     keep_documents_without_queries: bool = False,
     max_gold_chunks: int | None = 10,
+    max_query_tokens: int | None = DEFAULT_MAX_QUERY_TOKENS,
     fingerprint: SourceFingerprint | None = None,
     generation_id: str | None = None,
 ) -> RunSummary:
@@ -98,6 +120,7 @@ def build_dataset(
     empty source SHA-256 to say so.
     """
     output = Path(output_directory)
+    length = counter or o200k_counter()
     citation_limit = (
         config.max_words if max_citation_words is None else max_citation_words
     )
@@ -181,7 +204,7 @@ def build_dataset(
                 continue
 
             chunks = chunk_cleaned_document(
-                source.document_id, prepared.text, config=config, counter=counter
+                source.document_id, prepared.text, config=config, counter=length
             )
             if not chunks:
                 rejected += 1
@@ -203,8 +226,13 @@ def build_dataset(
             kept: list = []
             for item in prepared.evidence:
                 queries += 1
-                if require_answer_text and not item.query.has_answer_text:
-                    reason: str | None = "answer_has_no_text"
+                query_tokens = query_token_overflow(
+                    item.query.text, max_query_tokens, length
+                )
+                if query_tokens is not None:
+                    reason: str | None = "question_exceeds_max_tokens"
+                elif require_answer_text and not item.query.has_answer_text:
+                    reason = "answer_has_no_text"
                 elif not item.query.citations:
                     reason = "answer_has_no_citations"
                 elif not item.has_evidence:
@@ -244,6 +272,7 @@ def build_dataset(
                         "reference_answer": item.query.reference_answer,
                         "citations": list(item.query.citations),
                         "gold_chunks": len({e.chunk_id for e in citation_chunks}),
+                        **({"query_tokens": query_tokens} if query_tokens else {}),
                         "reason": reason,
                     }
                 )
@@ -376,6 +405,7 @@ def build_dataset(
                 "citation_filter": "trackable_and_within_max_citation_words",
                 "corpus_text": "plain_text_verified_before_chunking",
                 "max_gold_chunks": max_gold_chunks,
+                "max_query_tokens": max_query_tokens,
                 "document_filter": (
                     "kept_all"
                     if keep_documents_without_queries
@@ -450,6 +480,12 @@ def main() -> None:
         help="Drop queries needing more gold chunks than this (0 = no cap)",
     )
     parser.add_argument(
+        "--max-query-tokens",
+        type=int,
+        default=DEFAULT_MAX_QUERY_TOKENS,
+        help="Drop questions longer than this many o200k_base tokens (0 = no cap)",
+    )
+    parser.add_argument(
         "--keep-query-less-documents",
         action="store_true",
         help="Keep documents no retained query points at (open-corpus setups)",
@@ -478,6 +514,7 @@ def main() -> None:
         max_citation_words=args.max_citation_words,
         keep_documents_without_queries=args.keep_query_less_documents,
         max_gold_chunks=args.max_gold_chunks or None,
+        max_query_tokens=args.max_query_tokens or None,
         # replace() rather than a fresh ChunkingConfig: building one from
         # scratch silently drops any v4 default the CLI does not name.
         config=replace(

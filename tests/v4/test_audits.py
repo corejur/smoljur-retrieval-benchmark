@@ -265,3 +265,73 @@ def test_a_failed_build_leaves_no_audit_file_behind(tmp_path: Path, monkeypatch)
         build_dataset([_row("doc-a", ["Quem?"], [_ok()])], tmp_path)
 
     assert not any(path.is_file() for path in tmp_path.rglob("*"))
+
+
+# --- over-long questions -----------------------------------------------------
+
+
+def _long_question(words: int) -> str:
+    return " ".join(["palavra"] * (words - 1)) + " fim?"
+
+
+def test_a_question_over_the_token_limit_is_dropped_and_audited(tmp_path: Path) -> None:
+    from scripts.strategies.chunking.legal_recursive import WordCounter
+
+    rows = [_row("doc-a", ["Quem e o autor?", _long_question(40)], [_ok(), _ok("p-1")])]
+
+    summary = build_dataset(rows, tmp_path, counter=WordCounter(), max_query_tokens=30)
+
+    assert [r["_id"] for r in _read(tmp_path / "beir" / "queries.jsonl")] == ["doc-a:q0"]
+    (dropped,) = _audit(tmp_path, "dropped_queries")
+    assert dropped["query_id"] == "doc-a:q1"
+    assert dropped["reason"] == "question_exceeds_max_tokens"
+    assert dropped["query_tokens"] == 40
+    assert summary.dropped_queries == 1
+
+
+def test_a_question_exactly_at_the_limit_is_kept(tmp_path: Path) -> None:
+    from scripts.strategies.chunking.legal_recursive import WordCounter
+
+    rows = [_row("doc-a", [_long_question(30)], [_ok()])]
+
+    build_dataset(rows, tmp_path, counter=WordCounter(), max_query_tokens=30)
+
+    assert [r["_id"] for r in _read(tmp_path / "beir" / "queries.jsonl")] == ["doc-a:q0"]
+
+
+def test_the_default_limit_is_512_o200k_tokens(tmp_path: Path) -> None:
+    import tiktoken
+
+    long_text = " ".join(f"termo{i}" for i in range(600)) + "?"
+    assert len(tiktoken.get_encoding("o200k_base").encode(long_text)) > 512
+    rows = [_row("doc-a", ["Quem e o autor?", long_text], [_ok(), _ok("p-1")])]
+
+    build_dataset(rows, tmp_path)
+
+    assert _manifest(tmp_path)["max_query_tokens"] == 512
+    assert {r["query_id"]: r["reason"] for r in _audit(tmp_path, "dropped_queries")} == {
+        "doc-a:q1": "question_exceeds_max_tokens"
+    }
+
+
+def test_the_query_token_limit_can_be_disabled(tmp_path: Path) -> None:
+    long_text = " ".join(f"termo{i}" for i in range(600)) + "?"
+    rows = [_row("doc-a", [long_text], [_ok()])]
+
+    build_dataset(rows, tmp_path, max_query_tokens=None)
+
+    assert len(_read(tmp_path / "beir" / "queries.jsonl")) == 1
+    assert _manifest(tmp_path)["max_query_tokens"] is None
+
+
+def test_a_document_whose_only_question_is_too_long_is_rejected(tmp_path: Path) -> None:
+    from scripts.strategies.chunking.legal_recursive import WordCounter
+
+    rows = [_row("doc-a", [_long_question(40)], [_ok()])]
+
+    build_dataset(rows, tmp_path, counter=WordCounter(), max_query_tokens=30)
+
+    assert {r["document_id"]: r["reason"] for r in _audit(tmp_path, "rejected_sources")} == {
+        "doc-a": "no_retained_queries"
+    }
+    validate_generation(tmp_path, check_directory_identity=False)

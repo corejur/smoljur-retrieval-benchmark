@@ -133,7 +133,7 @@ As a researcher, I want ranking runs scored against the same relevance judgments
 - **FR-002**: The pipeline MUST normalize source document content into searchable text while retaining a way to trace cited evidence to the normalized document.
 - **FR-003**: The pipeline MUST produce ordered searchable passages with stable identities and source-document provenance.
 - **FR-004**: Every retained question MUST have answer text and at least one relevance judgment pointing to a published passage from its cited evidence under the default policy.
-- **FR-005**: The pipeline MUST exclude an individual question with missing answer text, missing citations, no mapped cited evidence, mapped evidence outside published passages, or more gold passages than the configured limit (ten by default), and MUST record its identity and specific exclusion reason.
+- **FR-005**: The pipeline MUST exclude an individual question with missing answer text, missing citations, no mapped cited evidence, mapped evidence outside published passages, more gold passages than the configured limit (ten by default), or question text longer than the configured token limit (512 `o200k_base` tokens by default, the passage cap), and MUST record its identity and specific exclusion reason.
 - **FR-006**: Under the default policy, the pipeline MUST retain a document when at least one question remains usable and exclude a document when none remain usable.
 - **FR-007**: Every retained question MUST have a candidate set limited to passages from its source document under the default evaluation mode.
 - **FR-008**: Each accepted citation MUST link to one relevant passage chosen by its greatest overlap with the cited evidence.

@@ -1,6 +1,6 @@
 # Implementation Plan: Representative Redator v4 Dataset Pipeline
 
-**Branch**: `v4-dataset-pipeline` (created manually, not by a hook) | **Date**: 2026-09-22 | **Spec**: [spec.md](spec.md)
+**Branch**: `001-redator-v4-dataset-pipeline` (feature integration branch; supersedes the manually created `v4-dataset-pipeline`; see [Branch Structure](#branch-structure)) | **Date**: 2026-09-22 | **Spec**: [spec.md](spec.md)
 
 **Input**: Feature specification from `specs/001-redator-v4-dataset-pipeline/spec.md`
 
@@ -92,6 +92,29 @@ compose.yaml                   # Planned local pgvector-enabled PostgreSQL servi
 **Structure Decision**: Keep v4 work in `scripts/v4/` and its tests in `tests/v4/`. A v4-specific publication module avoids changing the shared legacy publication contract. `scripts/v4/manifest.py` must declare any new v4 module. CLI, dataset, and index contracts live under this feature's `contracts/` directory. The local PostgreSQL deployment is separate from the remote vLLM server.
 
 **Naming**: three distinct things in this feature would otherwise all be called "manifest" and MUST NOT be conflated. `scripts/v4/manifest.py` is the **module registry** — which source files belong to the v4 build. `meta/manifest.json` is the **generation manifest** — one published dataset's identity, counts, and configuration. `scripts/v4/generation.py` implements and validates the *generation manifest* and owns one-time `current` resolution; it does not extend the module registry. Prose in this feature uses "module registry" or "generation manifest"; the bare word "manifest" is reserved for neither.
+
+## Branch Structure
+
+Branches follow the story dependency graph in [tasks.md](tasks.md). Each story branch starts from the feature branch once its dependencies are merged, and merges back into it; the feature branch merges into `main` once, after polish.
+
+| Branch | Base | Tasks | Status |
+|---|---|---|---|
+| `001-redator-v4-dataset-pipeline` | `main` | T001–T010 (Setup, Foundation, US1 MVP), then T034–T038 (Polish, Convergence) | Integration branch; US1 committed |
+| `001-us2-source-audits` | feature branch after US1 | T011–T015 | Ready |
+| `001-us3-generation-publication` | feature branch after US1 | T016–T019 | Ready |
+| `001-us4-pgvector-retrieval` | feature branch after US3 merges | T020–T030 | Created when US3 merges |
+| `001-us5-run-comparison` | `001-us3-generation-publication` | T031–T033 | Based on US3 for `locate_generation`; merge after US3 (live-run comparison waits for US4) |
+
+```text
+main
+ └─ 001-redator-v4-dataset-pipeline   Setup → Foundation → US1 ─────────────── Polish → main
+     ├─ 001-us2-source-audits              └→ US2 ──────────────┐
+     ├─ 001-us3-generation-publication     └→ US3 ─┐            │
+     │   └─ 001-us4-pgvector-retrieval             └→ US4 ──────┤
+     └─ 001-us5-run-comparison             └→ US5 ──────────────┘
+```
+
+US2 and US3 both edit `scripts/v4/run.py`; merge whichever finishes first, then rebase the other onto the feature branch before merging it.
 
 ## Design Approach
 
