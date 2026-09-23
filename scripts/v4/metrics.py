@@ -13,10 +13,16 @@ only the ordering matters.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
+import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
+
+from scripts.v4.generation import locate_generation, manifest_sha256, read_manifest
 
 __all__ = [
     "DEFAULT_K_VALUES",
@@ -25,6 +31,7 @@ __all__ = [
     "load_run",
     "evaluate_run",
     "evaluate_directory",
+    "comparison_report",
 ]
 
 DEFAULT_K_VALUES: tuple[int, ...] = (1, 3, 5, 10, 20, 100)
@@ -52,20 +59,49 @@ def load_qrels(path: str | Path) -> dict[str, dict[str, int]]:
             if len(parts) != 3:
                 raise ValueError(f"{path}:{line_number}: expected 3 tab-separated fields")
             query_id, chunk_id, score = parts
-            qrels.setdefault(query_id, {})[chunk_id] = int(score)
+            try:
+                relevance = int(score)
+            except ValueError:
+                raise ValueError(
+                    f"{path}:{line_number}: relevance {score!r} is not an integer"
+                ) from None
+            qrels.setdefault(query_id, {})[chunk_id] = relevance
     if not qrels:
         raise ValueError(f"no qrels found in {path}")
     return qrels
 
 
+def _finite(score: float, where: str) -> float:
+    # NaN sorts arbitrarily and infinities dominate every ranking: either
+    # would decide a comparison by accident rather than by the model.
+    if not math.isfinite(score):
+        raise ValueError(f"{where}: score {score!r} is not finite")
+    return score
+
+
+def _json_score(value: Any, where: str) -> float:
+    # bool is an int subclass, and a string like "1.5" would float() fine:
+    # both are malformed run files, not scores.
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{where}: score must be a number, found {value!r}")
+    return _finite(float(value), where)
+
+
 def load_run(path: str | Path) -> dict[str, dict[str, float]]:
-    """Read a retrieval run, accepting either JSON or TREC format."""
+    """Read a retrieval run, accepting either JSON or TREC format.
+
+    Every score must be a finite number; a malformed, empty, or duplicated
+    entry is rejected with the file (and line, for TREC) that holds it.
+    """
     source = Path(path)
     text = source.read_text(encoding="utf-8").strip()
     if not text:
         raise ValueError(f"empty run file: {source}")
     if text[0] in "{[":
-        loaded = json.loads(text)
+        try:
+            loaded = json.loads(text)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{source}: not valid JSON ({error})") from None
         if not isinstance(loaded, dict):
             raise ValueError(f"{source}: JSON run must be an object keyed by query id")
         if _is_metrics_report(loaded):
@@ -80,7 +116,14 @@ def load_run(path: str | Path) -> dict[str, dict[str, float]]:
                     f"{source}: query {query_id!r} must map to "
                     f"{{chunk_id: score}}, found {type(ranked).__name__}"
                 )
-            run[str(query_id)] = {str(k): float(v) for k, v in ranked.items()}
+            run[str(query_id)] = {
+                str(chunk_id): _json_score(
+                    score, f"{source}: query {query_id!r} chunk {chunk_id!r}"
+                )
+                for chunk_id, score in ranked.items()
+            }
+        if not run:
+            raise ValueError(f"empty run file: {source} ranks no query")
         return run
     run: dict[str, dict[str, float]] = {}
     for line_number, line in enumerate(text.splitlines(), start=1):
@@ -90,7 +133,17 @@ def load_run(path: str | Path) -> dict[str, dict[str, float]]:
         if len(parts) < 5:
             raise ValueError(f"{source}:{line_number}: expected a TREC run line")
         query_id, _, chunk_id, _, score = parts[:5]
-        run.setdefault(query_id, {})[chunk_id] = float(score)
+        where = f"{source}:{line_number}"
+        try:
+            value = float(score)
+        except ValueError:
+            raise ValueError(f"{where}: score {score!r} is not a number") from None
+        ranked = run.setdefault(query_id, {})
+        if chunk_id in ranked:
+            raise ValueError(
+                f"{where}: duplicate row for query {query_id!r} chunk {chunk_id!r}"
+            )
+        ranked[chunk_id] = _finite(value, where)
     return run
 
 
@@ -189,6 +242,66 @@ def evaluate_directory(
     return scored
 
 
+def comparison_report(
+    qrels_path: str | Path,
+    scores: Sequence[ModelScores],
+    *,
+    k_values: Iterable[int],
+) -> dict[str, Any]:
+    """The comparison as a record: what was judged, against what, and how.
+
+    `generation` names the published generation the qrels came from, pinned
+    past `current`, or is None for qrels supplied from outside a generation.
+    `judgments` fingerprints the exact qrels bytes every run was scored
+    against, so two reports can be checked for comparability.
+    """
+    located = locate_generation(qrels_path)
+    generation: dict[str, Any] | None = None
+    qrels_file = Path(qrels_path)
+    if located is not None:
+        root, qrels_file = located
+        manifest = read_manifest(root)
+        generation = {
+            "generation_id": manifest.generation_id,
+            "manifest_sha256": manifest_sha256(root),
+            "split": manifest.split,
+        }
+    qrels = load_qrels(qrels_file)
+    return {
+        "k_values": sorted(set(k_values)),
+        "generation": generation,
+        "judgments": {
+            "qrels": str(qrels_file),
+            "qrels_sha256": hashlib.sha256(qrels_file.read_bytes()).hexdigest(),
+            "queries": len(qrels),
+            "judgments": sum(len(judged) for judged in qrels.values()),
+        },
+        "models": [
+            {
+                "model": item.model,
+                "queries_scored": item.queries_scored,
+                "queries_missing": item.queries_missing,
+                "metrics": item.metrics,
+            }
+            for item in scores
+        ],
+    }
+
+
+def _write_atomically(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
 def comparison_table(scores: Sequence[ModelScores], metrics: Sequence[str]) -> str:
     """Render a fixed-width leaderboard, best value first."""
     if not scores:
@@ -219,7 +332,18 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    scores = evaluate_directory(args.qrels, args.runs, k_values=args.k_values)
+    runs = args.runs.resolve()
+    if args.output and runs in args.output.resolve().parents:
+        parser.error(
+            f"--output {args.output} is inside the runs directory {args.runs}; "
+            "write the report elsewhere so it is not read as a competing run"
+        )
+
+    # Resolve `current` once: every run is scored against the same qrels
+    # even if a new generation is published while this is running.
+    located = locate_generation(args.qrels)
+    qrels = located[1] if located else args.qrels
+    scores = evaluate_directory(qrels, args.runs, k_values=args.k_values)
     print(comparison_table(scores, args.report))
     for item in scores:
         if item.queries_missing:
@@ -229,27 +353,9 @@ def main() -> None:
                 f"{item.queries_missing + item.queries_scored} queries"
             )
     if args.output:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(
-            json.dumps(
-                {
-                    "qrels": str(args.qrels),
-                    "k_values": args.k_values,
-                    "models": [
-                        {
-                            "model": item.model,
-                            "queries_scored": item.queries_scored,
-                            "queries_missing": item.queries_missing,
-                            "metrics": item.metrics,
-                        }
-                        for item in scores
-                    ],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
+        report = comparison_report(qrels, scores, k_values=args.k_values)
+        _write_atomically(
+            args.output, json.dumps(report, ensure_ascii=False, indent=2) + "\n"
         )
         print(f"wrote {args.output}")
 

@@ -130,12 +130,12 @@ description: "Dependency-ordered implementation tasks for the Representative Red
 
 ### Tests for User Story 5
 
-- [ ] T031 [US5] Add failing comparison tests in `tests/v4/test_metrics.py` for two runs sharing qrels/cutoffs, zero-filled missing judged queries and `queries_missing`, NDCG/MAP/Recall/Precision/MRR at requested k, rejection of empty/malformed/non-finite/unrelated runs, and report files not mistaken for runs.
+- [X] T031 [US5] Add failing comparison tests in `tests/v4/test_metrics.py` for two runs sharing qrels/cutoffs, zero-filled missing judged queries and `queries_missing`, NDCG/MAP/Recall/Precision/MRR at requested k, rejection of empty/malformed/non-finite/unrelated runs, and report files not mistaken for runs.
 
 ### Implementation for User Story 5
 
-- [ ] T032 [US5] Tighten JSON/TREC score and structure validation in `scripts/v4/metrics.py`; keep one evaluator and the same qrels/cutoffs for every run, reject non-finite scores and no-common-query runs, and preserve zero-scoring missing judged questions.
-- [ ] T033 [US5] Produce a comparison report with generation/judgment provenance, common cutoffs, per-run measures, `queries_scored`, and `queries_missing` in `scripts/v4/metrics.py`; support two Qwen runs with different top-k values without requiring a second indexed model.
+- [X] T032 [US5] Tighten JSON/TREC score and structure validation in `scripts/v4/metrics.py`; keep one evaluator and the same qrels/cutoffs for every run, reject non-finite scores and no-common-query runs, and preserve zero-scoring missing judged questions.
+- [X] T033 [US5] Produce a comparison report with generation/judgment provenance, common cutoffs, per-run measures, `queries_scored`, and `queries_missing` in `scripts/v4/metrics.py`; support two Qwen runs with different top-k values without requiring a second indexed model.
 
 **Checkpoint**: Two ranking runs are comparable without model-specific metric code, and omissions cannot inflate aggregate scores.
 

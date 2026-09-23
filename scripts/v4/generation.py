@@ -30,6 +30,7 @@ __all__ = [
     "REQUIRED_MANIFEST_KEYS",
     "REQUIRED_SUMMARY_KEYS",
     "load_generation",
+    "locate_generation",
     "manifest_sha256",
     "new_generation_id",
     "pin_generation_path",
@@ -430,6 +431,30 @@ def resolve_current(dataset_root: str | Path) -> Path:
     return resolved
 
 
+def locate_generation(path: str | Path) -> tuple[Path, Path] | None:
+    """Find the validated generation holding `path`, pinned past `current`.
+
+    Returns `(generation_root, pinned_path)`, or None when `path` is not
+    inside a published generation at all (a supplied qrels file, say). A
+    path that *is* inside one is validated, and a broken generation raises
+    rather than being mistaken for "not a generation".
+    """
+    absolute = Path(os.path.abspath(path))
+    for ancestor in (absolute, *absolute.parents):
+        if ancestor.name == CURRENT and ancestor.is_symlink():
+            generation = resolve_current(ancestor.parent)
+            validate_generation(generation)
+            return generation, generation / absolute.relative_to(ancestor)
+    resolved = absolute.resolve()
+    for ancestor in (resolved, *resolved.parents):
+        if ancestor.parent.name == GENERATIONS and (ancestor / MANIFEST).is_file():
+            if ancestor.name.startswith("."):
+                raise GenerationError(f"{ancestor} is an unpublished build")
+            validate_generation(ancestor)
+            return ancestor, resolved
+    return None
+
+
 def pin_generation_path(path: str | Path) -> Path:
     """Pin a path inside a dataset to one validated, immutable generation.
 
@@ -439,19 +464,9 @@ def pin_generation_path(path: str | Path) -> Path:
     passes through it, so a later publication cannot change what it names.
     The generation is validated before the path is returned.
     """
-    absolute = Path(os.path.abspath(path))
-    for ancestor in (absolute, *absolute.parents):
-        if ancestor.name == CURRENT and ancestor.is_symlink():
-            generation = resolve_current(ancestor.parent)
-            validate_generation(generation)
-            return generation / absolute.relative_to(ancestor)
-    resolved = absolute.resolve()
-    for ancestor in (resolved, *resolved.parents):
-        if ancestor.parent.name == GENERATIONS and (ancestor / MANIFEST).is_file():
-            if ancestor.name.startswith("."):
-                raise GenerationError(f"{ancestor} is an unpublished build")
-            validate_generation(ancestor)
-            return resolved
+    located = locate_generation(path)
+    if located is not None:
+        return located[1]
     raise GenerationError(
         f"{path} is not inside a published generation (expected "
         f"<root>/{CURRENT}/... or <root>/{GENERATIONS}/<generation-id>/...)"
