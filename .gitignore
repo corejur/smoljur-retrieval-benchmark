@@ -137,3 +137,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Local materialized dataset
+datasets/representative-redator-2k-v1-v3/
