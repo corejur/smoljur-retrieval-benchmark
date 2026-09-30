@@ -72,13 +72,16 @@ def _normalize_parts(parts: Sequence[tuple[str, tuple[str, ...]]]) -> tuple[str,
         nonlocal line
         normalized: list[tuple[str, tuple[str, ...]]] = []
         whitespace_ids: set[str] = set()
+        whitespace_seen = False
         for character, citation_ids in line:
             if character in " \t":
                 whitespace_ids.update(citation_ids)
+                whitespace_seen = True
                 continue
-            if whitespace_ids and normalized:
+            if whitespace_seen and normalized:
                 normalized.append((" ", tuple(sorted(whitespace_ids))))
             whitespace_ids.clear()
+            whitespace_seen = False
             normalized.append((character, citation_ids))
         while normalized and normalized[-1][0] == " ":
             normalized.pop()

@@ -406,3 +406,40 @@ def test_ties_follow_trec_eval_like_the_other_metrics(tmp_path: Path) -> None:
         assert metrics["Pass@1"] == 0.5
         assert metrics["MRR@1"] == 0.5
         assert metrics["P@1"] == 0.5
+
+
+# --- the model behind each run -------------------------------------------------
+
+
+def _provenance(runs: Path, run: str, model_id: str) -> None:
+    record = runs.parent / f"{runs.name}.provenance" / f"{run}.json"
+    record.parent.mkdir(exist_ok=True)
+    record.write_text(
+        json.dumps({"run_file": str(runs / f"{run}.json"), "model_id": model_id}), encoding="utf-8"
+    )
+
+
+def test_the_report_names_each_runs_model_from_its_provenance(tmp_path: Path) -> None:
+    from scripts.v4.metrics import comparison_report
+
+    runs = _runs_dir(tmp_path, bge={"q1": {"c1": 1.0}, "q2": {"c5": 1.0}}, adhoc={"q1": {"c1": 1.0}})
+    _provenance(runs, "bge", "BAAI/bge-m3")
+    qrels = _qrels_file(tmp_path)
+
+    report = comparison_report(qrels, evaluate_directory(qrels, runs, k_values=[1]), k_values=[1])
+
+    entries = {entry["model"]: entry for entry in report["models"]}
+    assert entries["bge"]["model_id"] == "BAAI/bge-m3"
+    assert "model_id" not in entries["adhoc"]  # no provenance: nothing is guessed
+
+
+def test_a_symlinked_run_finds_the_provenance_beside_its_real_file(tmp_path: Path) -> None:
+    runs = _runs_dir(tmp_path, jina={"q1": {"c1": 1.0}, "q2": {"c5": 1.0}})
+    _provenance(runs, "jina", "jinaai/jina-embeddings-v5-text-small")
+    selection = tmp_path / "selection"
+    selection.mkdir()
+    (selection / "jina.json").symlink_to(runs / "jina.json")
+
+    (scores,) = evaluate_directory(_qrels_file(tmp_path), selection, k_values=[1])
+
+    assert scores.model_id == "jinaai/jina-embeddings-v5-text-small"

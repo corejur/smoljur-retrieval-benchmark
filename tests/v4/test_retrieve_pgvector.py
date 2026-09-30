@@ -11,6 +11,7 @@ import pytest
 pytest.importorskip("psycopg")
 
 from scripts.v4.embeddings import (  # noqa: E402
+    BGE_M3_MODEL_ID,
     CHUNK_TEXT_PROFILE,
     QUERY_INSTRUCTION,
     QWEN_MODEL_ID,
@@ -74,6 +75,57 @@ def test_only_instructed_questions_are_embedded(indexed, fake_vllm, pg_env) -> N
         "Instruct: Retrieve the passage from the same legal document that answers "
         "the question.\nQuery:"
     )
+
+
+def test_each_model_ranks_from_its_own_build(indexed, fake_vllm, pg_env) -> None:
+    root, generation, qwen_build = indexed
+    bge_build = build_index(
+        root, embedder=_embedder(fake_vllm, model=BGE_M3_MODEL_ID), dsn_env=pg_env
+    )
+    fake_vllm.requests.clear()
+    questions = [q["text"] for q in _jsonl(generation.path / "beir" / "queries.jsonl")]
+
+    ranked = rank(
+        root / "current" / "beir",
+        embedder=_embedder(fake_vllm, model=BGE_M3_MODEL_ID),
+        dsn_env=pg_env,
+    )
+
+    assert sorted(fake_vllm.texts) == sorted(questions)
+    assert ranked.provenance["index_build_id"] == bge_build.index_build_id != qwen_build.index_build_id
+    assert ranked.provenance["model_id"] == BGE_M3_MODEL_ID
+    assert ranked.provenance["query_instruction"] == ""
+
+
+def test_a_2560_dimensional_model_ranks_from_its_own_build(indexed, fake_vllm, pg_env) -> None:
+    from scripts.v4.embeddings import QWEN3_4B_MODEL_ID
+
+    root, generation, _ = indexed
+    build_index(root, embedder=_embedder(fake_vllm, model=QWEN3_4B_MODEL_ID), dsn_env=pg_env)
+    fake_vllm.requests.clear()
+
+    ranked = rank(
+        root / "current" / "beir",
+        embedder=_embedder(fake_vllm, model=QWEN3_4B_MODEL_ID),
+        dsn_env=pg_env,
+        top_k=3,
+    )
+
+    assert ranked.provenance["model_id"] == QWEN3_4B_MODEL_ID
+    assert len(ranked.run) == generation.summary.queries_retained
+    assert all(0 < len(r) <= 3 for r in ranked.run.values())
+
+
+def test_a_model_without_a_build_is_not_ready(indexed, fake_vllm, pg_env) -> None:
+    root, _, _ = indexed
+
+    with pytest.raises(IndexNotReadyError, match="index_not_ready"):
+        rank(
+            root / "current" / "beir",
+            embedder=_embedder(fake_vllm, model=BGE_M3_MODEL_ID),
+            dsn_env=pg_env,
+        )
+    assert fake_vllm.requests == []
 
 
 # --- what comes back ----------------------------------------------------------

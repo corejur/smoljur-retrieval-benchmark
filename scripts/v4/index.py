@@ -1,13 +1,13 @@
-"""Build the Qwen pgvector index for the current published generation.
+"""Build one model's pgvector index for the current published generation.
 
     python -m scripts.v4.index DATASET_ROOT --base-url https://host/v1
-        [--model Qwen/Qwen3-Embedding-0.6B] [--model-revision REV]
+        [--model MODEL_ID] [--model-revision REV]
         [--postgres-dsn-env V4_POSTGRES_DSN] [--batch-size N]
 
-`DATASET_ROOT/current` is resolved once. Every published chunk's text is sent
-to the trusted vLLM server exactly once, in `(document_id, chunk_index,
+`DATASET_ROOT/current` is resolved once. Every published chunk's text, under
+the model's passage prefix, is sent to the trusted vLLM server exactly once, in `(document_id, chunk_index,
 chunk_id)` order and bounded batches, and stored as one L2-normalized
-`vector(1024)` row under a new build ID. The build is checked against the
+vector row, at the model's full dimension, under a new build ID. The build is checked against the
 corpus and the generation manifest's `summary.chunks`, then activated in one
 PostgreSQL transaction. Any failure marks the new build failed and leaves the
 previously active build selected.
@@ -26,12 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
-from scripts.v4.embeddings import (
-    CHUNK_TEXT_PROFILE,
-    QUERY_INSTRUCTION,
-    QWEN_MODEL_ID,
-    RemoteEmbedder,
-)
+from scripts.v4.embeddings import MODELS, QWEN_MODEL_ID, RemoteEmbedder
 from scripts.v4.generation import load_generation, manifest_sha256
 from scripts.v4.pgvector_store import (
     BuildProvenance,
@@ -125,9 +120,10 @@ def build_index(
         generation_manifest_sha256=manifest_digest,
         source_sha256=manifest.source_sha256,
         split=manifest.split,
-        query_instruction=QUERY_INSTRUCTION,
-        chunk_text_profile=CHUNK_TEXT_PROFILE,
+        query_instruction=embedder.profile.query_instruction,
+        chunk_text_profile=embedder.profile.chunk_text_profile,
         chunk_count=manifest.chunks,
+        dimension=embedder.profile.dimension,
     )
 
     conn = connect(dsn_env)
@@ -166,7 +162,7 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("dataset_root", type=Path, help="Directory holding current/ and generations/")
-    parser.add_argument("--model", default=QWEN_MODEL_ID, help=f"Only {QWEN_MODEL_ID} is accepted")
+    parser.add_argument("--model", default=QWEN_MODEL_ID, choices=MODELS, help="Model served by the vLLM server")
     parser.add_argument(
         "--model-revision",
         default=UNPINNED_REVISION,

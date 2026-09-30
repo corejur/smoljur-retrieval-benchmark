@@ -1,9 +1,12 @@
-"""The trusted remote vLLM embedding adapter, pinned to Qwen3-Embedding-0.6B.
+"""The trusted remote vLLM embedding adapter for the benchmarked models.
 
 Indexing sends every published chunk's full cleaned text, and retrieval every
 question, to one operator-trusted vLLM server (`POST {base_url}/embeddings`).
 This module is the only code that talks to it, so it owns every guarantee
 about that exchange:
+
+* Only a model registered in `MODELS` is sent text, each under its own
+  versioned query instruction and passage prefix (its `EmbeddingModel`).
 
 * FR-026: the endpoint is checked before any text leaves the process. It must
   be `https://` with certificate verification, or a loopback address (which
@@ -13,12 +16,13 @@ about that exchange:
 * A response is used only when it has exactly one result per input, indices
   exactly 0..N-1, and 1,024 finite numeric values with nonzero norm per
   vector. Vectors are then L2-normalized to float32.
-* Timeouts, connection failures, 408, 429, and 5xx are retried within a
-  bound; every other failure is permanent and fails at once.
+* Timeouts, connection failures (including a response cut off mid-body),
+  408, 429, and 5xx are retried within a bound; every other failure is permanent and fails at once.
 """
 
 from __future__ import annotations
 
+import http.client
 import ipaddress
 import json
 import math
@@ -37,19 +41,33 @@ __all__ = [
     "API_KEY_ENV",
     "TUNNEL_HOSTS_ENV",
     "CHUNK_TEXT_PROFILE",
+    "BGE_M3",
+    "BGE_M3_MODEL_ID",
     "DIMENSION",
+    "JINA_V5_TEXT_SMALL",
+    "JINA_V5_TEXT_SMALL_MODEL_ID",
+    "MODELS",
     "QUERY_INSTRUCTION",
+    "QWEN",
+    "QWEN3_4B",
+    "QWEN3_4B_MODEL_ID",
     "QWEN_MODEL_ID",
+    "EmbeddingModel",
     "EmbeddingServiceError",
     "EmbeddingUsage",
     "EndpointConfigurationError",
     "RemoteEmbedder",
     "instructed_query",
+    "model_profile",
     "validate_endpoint",
 ]
 
-#: The only model this feature indexes or queries.
 QWEN_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"
+QWEN3_4B_MODEL_ID = "Qwen/Qwen3-Embedding-4B"
+JINA_V5_TEXT_SMALL_MODEL_ID = "jinaai/jina-embeddings-v5-text-small"
+BGE_M3_MODEL_ID = "BAAI/bge-m3"
+#: The default model output size. Every model is stored at its own full
+#: (non-Matryoshka) size, `EmbeddingModel.dimension`; this is the common one.
 DIMENSION = 1024
 API_KEY_ENV = "V4_EMBEDDING_API_KEY"
 
@@ -70,6 +88,67 @@ QUERY_INSTRUCTION = (
 #: How chunk text is composed before embedding: the corpus `text` field
 #: exactly as published — no title, no instruction. Part of build identity.
 CHUNK_TEXT_PROFILE = "corpus-text:no-title:no-instruction:v1"
+
+
+
+@dataclass(frozen=True)
+class EmbeddingModel:
+    """How one model's text is composed before embedding.
+
+    `query_instruction` is prepended to every question and `passage_prefix`
+    to every chunk's text; `chunk_text_profile` names the passage composition.
+    `dimension` is the model's full output size, which every vector must have
+    (no reduced Matryoshka size is ever requested). All four are part of build
+    identity: changing one makes existing index builds for the model
+    incompatible, by design.
+    """
+
+    model_id: str
+    query_instruction: str
+    passage_prefix: str
+    chunk_text_profile: str
+    dimension: int = DIMENSION
+
+    def query_text(self, question: str) -> str:
+        return self.query_instruction + question
+
+    def passage_text(self, text: str) -> str:
+        return self.passage_prefix + text
+
+
+QWEN = EmbeddingModel(QWEN_MODEL_ID, QUERY_INSTRUCTION, "", CHUNK_TEXT_PROFILE)
+
+#: The larger Qwen3-Embedding: same instruction format, 2,560 dimensions.
+QWEN3_4B = EmbeddingModel(
+    QWEN3_4B_MODEL_ID, QUERY_INSTRUCTION, "", CHUNK_TEXT_PROFILE, dimension=2560
+)
+
+#: vLLM (0.30+) merges the model's `retrieval` LoRA adapter at load time but
+#: does not add its prompts, so the `Query: `/`Document: ` prefixes from the
+#: model card are sent with the text.
+JINA_V5_TEXT_SMALL = EmbeddingModel(
+    JINA_V5_TEXT_SMALL_MODEL_ID,
+    query_instruction="Query: ",
+    passage_prefix="Document: ",
+    chunk_text_profile="corpus-text:no-title:document-prefix:v1",
+)
+
+#: BGE-M3 dense retrieval takes queries and passages without any instruction.
+BGE_M3 = EmbeddingModel(BGE_M3_MODEL_ID, "", "", CHUNK_TEXT_PROFILE)
+
+#: The models this pipeline may index or query, by the ID sent to vLLM.
+MODELS = {model.model_id: model for model in (QWEN, QWEN3_4B, JINA_V5_TEXT_SMALL, BGE_M3)}
+
+
+def model_profile(model_id: str) -> EmbeddingModel:
+    """The registered text profile for `model_id`, or ValueError."""
+    try:
+        return MODELS[model_id]
+    except KeyError:
+        raise ValueError(
+            f"{model_id!r} is not a benchmarked model; use one of {', '.join(MODELS)}"
+        ) from None
+
 
 _RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost.localdomain"})
@@ -126,9 +205,9 @@ def _reported_tokens(payload: Any) -> int | None:
     return tokens
 
 
-def instructed_query(question: str) -> str:
-    """The exact text embedded for one question."""
-    return QUERY_INSTRUCTION + question
+def instructed_query(question: str, model: str = QWEN_MODEL_ID) -> str:
+    """The exact text embedded for one question under `model`."""
+    return model_profile(model).query_text(question)
 
 
 def _is_loopback(host: str) -> bool:
@@ -197,17 +276,14 @@ class RemoteEmbedder:
         api_key_env: str = API_KEY_ENV,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        if model != QWEN_MODEL_ID:
-            raise ValueError(
-                f"only {QWEN_MODEL_ID} may be indexed or queried in this feature; "
-                f"got {model!r}"
-            )
+        profile = model_profile(model)
         if batch_size <= 0:
             raise ValueError("batch_size must be positive")
         if max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
         self.base_url = validate_endpoint(base_url, verify_tls=verify_tls)
         self.model = model
+        self.profile = profile
         self.batch_size = batch_size
         self.timeout = timeout
         self.max_attempts = max_attempts
@@ -228,12 +304,12 @@ class RemoteEmbedder:
         return f"RemoteEmbedder({self.base_url!r}, model={self.model!r})"
 
     def embed_passages(self, texts: Sequence[str]) -> np.ndarray:
-        """Embed chunk text exactly as given (no instruction)."""
-        return self._embed(list(texts))
+        """Embed chunk text under the model's passage prefix (none for Qwen)."""
+        return self._embed([self.profile.passage_text(text) for text in texts])
 
     def embed_queries(self, questions: Sequence[str]) -> np.ndarray:
-        """Embed questions under the versioned Qwen query instruction."""
-        return self._embed([instructed_query(question) for question in questions])
+        """Embed questions under the model's versioned query instruction."""
+        return self._embed([self.profile.query_text(question) for question in questions])
 
     def _embed(self, texts: list[str]) -> np.ndarray:
         batches = [
@@ -241,12 +317,12 @@ class RemoteEmbedder:
             for start in range(0, len(texts), self.batch_size)
         ]
         if not batches:
-            return np.zeros((0, DIMENSION), dtype=np.float32)
+            return np.zeros((0, self.profile.dimension), dtype=np.float32)
         return np.concatenate(batches)
 
     def _embed_batch(self, batch: list[str]) -> np.ndarray:
         payload = self._post({"model": self.model, "input": batch})
-        vectors = _validated(payload, len(batch), self._url)
+        vectors = _validated(payload, len(batch), self._url, self.profile.dimension)
         tokens = _reported_tokens(payload)
         before = self._usage
         self._usage = EmbeddingUsage(
@@ -299,11 +375,17 @@ class RemoteEmbedder:
                 if not retryable:
                     raise failure from None
                 continue
-            except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as error:
+            except (
+                urllib.error.URLError,
+                http.client.HTTPException,  # e.g. IncompleteRead: the connection dropped mid-body
+                TimeoutError,
+                ConnectionError,
+                OSError,
+            ) as error:
                 self._count_attempt(time.perf_counter() - started)
                 reason = getattr(error, "reason", error)
                 failure = EmbeddingServiceError(
-                    f"embedding service {self._url} unreachable: "
+                    f"embedding service {self._url} unreachable or disconnected: "
                     f"{type(reason).__name__}",
                     retryable=True,
                 )
@@ -323,7 +405,7 @@ class RemoteEmbedder:
         )
 
 
-def _validated(payload: Any, expected: int, url: str) -> np.ndarray:
+def _validated(payload: Any, expected: int, url: str, dimension: int = DIMENSION) -> np.ndarray:
     """Check one response against the contract and return unit vectors."""
 
     def reject(reason: str) -> EmbeddingServiceError:
@@ -348,14 +430,14 @@ def _validated(payload: Any, expected: int, url: str) -> np.ndarray:
             f"result indices {sorted(by_index)} are not exactly 0..{expected - 1}"
         )
 
-    vectors = np.empty((expected, DIMENSION), dtype=np.float32)
+    vectors = np.empty((expected, dimension), dtype=np.float32)
     for index in range(expected):
         embedding = by_index[index].get("embedding")
         if not isinstance(embedding, list):
             raise reject(f"result {index} has no embedding list")
-        if len(embedding) != DIMENSION:
+        if len(embedding) != dimension:
             raise reject(
-                f"result {index} has {len(embedding)} dimensions, expected {DIMENSION}"
+                f"result {index} has {len(embedding)} dimensions, expected {dimension}"
             )
         if any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in embedding):
             raise reject(f"result {index} holds a non-numeric value")

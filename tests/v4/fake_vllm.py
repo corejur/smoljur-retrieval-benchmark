@@ -35,7 +35,15 @@ def token_count(text: str) -> int:
     return len(re.findall(r"\w+", text))
 
 
-def ok_response(inputs: list[str]) -> dict[str, Any]:
+def model_dimension(model: Any) -> int:
+    """The registered model's full output size; DIMENSION for anything else."""
+    from scripts.v4.embeddings import MODELS
+
+    profile = MODELS.get(model) if isinstance(model, str) else None
+    return profile.dimension if profile else DIMENSION
+
+
+def ok_response(inputs: list[str], dimension: int = DIMENSION) -> dict[str, Any]:
     tokens = sum(token_count(text) for text in inputs)
     return {
         "object": "list",
@@ -43,11 +51,15 @@ def ok_response(inputs: list[str]) -> dict[str, Any]:
         # Same shape as vLLM's OpenAI-compatible usage block.
         "usage": {"prompt_tokens": tokens, "total_tokens": tokens, "completion_tokens": 0},
         "data": [
-            {"object": "embedding", "index": i, "embedding": embed_text(text)}
+            {"object": "embedding", "index": i, "embedding": embed_text(text, dimension)}
             for i, text in enumerate(inputs)
         ],
     }
 
+
+#: A scripted body that sends half of a correct response, then closes the
+#: connection, as a dropped tunnel does.
+TRUNCATED = object()
 
 #: A scripted reply: (status, JSON body) for the given request inputs.
 Reply = Callable[[list[str]], "tuple[int, Any]"]
@@ -95,7 +107,16 @@ def start_fake_vllm() -> FakeVllm:
             elif fake.script:
                 status, body = fake.script.pop(0)(payload["input"])
             else:
-                status, body = 200, ok_response(payload["input"])
+                status, body = 200, ok_response(payload["input"], model_dimension(payload.get("model")))
+            if body is TRUNCATED:
+                encoded = json.dumps(ok_response(payload["input"])).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded[: len(encoded) // 2])
+                self.close_connection = True
+                return
             encoded = (
                 body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
             )

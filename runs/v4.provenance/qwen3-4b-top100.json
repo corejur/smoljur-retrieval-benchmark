@@ -1,0 +1,35 @@
+{
+  "run_file": "runs/v4/qwen3-4b-top100.json",
+  "generation_id": "20260923-210317-04e526",
+  "generation_manifest_sha256": "5d7b1a5f196c1d7fd66e429e5d19cf0cad8e36f8ad17ba5d3e775e568400f7d6",
+  "index_build_id": "ib-20260930-203702-7e5cb717",
+  "model_id": "Qwen/Qwen3-Embedding-4B",
+  "model_revision": "unpinned",
+  "query_instruction": "Instruct: Retrieve the passage from the same legal document that answers the question.\nQuery:",
+  "chunk_text_profile": "corpus-text:no-title:no-instruction:v1",
+  "normalization": "l2",
+  "score": "cosine_similarity",
+  "split": "test",
+  "top_k": 100,
+  "queries": 7065,
+  "cost": {
+    "wall_seconds": 98.455,
+    "embedding": {
+      "requests": 111,
+      "attempts": 111,
+      "texts": 7065,
+      "prompt_tokens": 524948,
+      "seconds": 69.021
+    },
+    "search": {
+      "queries": 7065,
+      "seconds": 19.943,
+      "latency_ms": {
+        "mean": 2.823,
+        "p50": 1.414,
+        "p95": 9.74,
+        "max": 46.765
+      }
+    }
+  }
+}
