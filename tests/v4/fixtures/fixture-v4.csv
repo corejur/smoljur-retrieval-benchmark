@@ -1,0 +1,3 @@
+id,question_texts,output,data
+doc-1,"[""Quem apresentou o pedido de revisão?"",""Qual é a idade da pessoa?""]","[{""answer"":""Ana"",""citations"":[""p-0""]},{""answer"":null,""citations"":[]}]","<p id=""p-0"">Ana apresentou pedido de revisão contratual ao tribunal.</p><p id=""p-1"">O processo registra documentos, datas, valores e fundamentos adicionais para análise detalhada do caso e encaminhamento à instância competente.</p>"
+doc-2,"[""Qual é o prazo de resposta?""]","[{""answer"":""Trinta dias"",""citations"":[""p-0""]}]","<p id=""p-0"">O contrato fixa prazo de trinta dias para resposta.</p><p id=""p-1"">As demais cláusulas tratam de comunicação, assinatura, arquivamento e guarda dos registros durante todo o procedimento administrativo.</p>"

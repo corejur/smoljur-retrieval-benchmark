@@ -14,8 +14,12 @@ import numpy as np
 import pytest
 
 from scripts.v4.embeddings import (
+    BGE_M3_MODEL_ID,
     DIMENSION,
+    JINA_V5_TEXT_SMALL_MODEL_ID,
+    MODELS,
     QUERY_INSTRUCTION,
+    QWEN3_4B_MODEL_ID,
     QWEN_MODEL_ID,
     EmbeddingServiceError,
     EndpointConfigurationError,
@@ -23,7 +27,7 @@ from scripts.v4.embeddings import (
     instructed_query,
     validate_endpoint,
 )
-from .fake_vllm import embed_text, ok_response
+from .fake_vllm import TRUNCATED, embed_text, ok_response
 
 
 def _embedder(fake, **kwargs) -> RemoteEmbedder:
@@ -42,9 +46,24 @@ def _reply(data):
 # --- model pin ----------------------------------------------------------------
 
 
-def test_only_the_qwen_model_is_accepted() -> None:
-    with pytest.raises(ValueError, match="Qwen/Qwen3-Embedding-0.6B"):
-        RemoteEmbedder("http://127.0.0.1:8000/v1", model="BAAI/bge-m3")
+def test_only_benchmarked_models_are_accepted() -> None:
+    assert set(MODELS) == {
+        QWEN_MODEL_ID,
+        QWEN3_4B_MODEL_ID,
+        JINA_V5_TEXT_SMALL_MODEL_ID,
+        BGE_M3_MODEL_ID,
+    }
+    with pytest.raises(ValueError, match="not a benchmarked model"):
+        RemoteEmbedder("http://127.0.0.1:8000/v1", model="intfloat/e5-large")
+
+
+@pytest.mark.parametrize("model", [JINA_V5_TEXT_SMALL_MODEL_ID, BGE_M3_MODEL_ID])
+def test_requests_name_the_chosen_model(fake_vllm, model: str) -> None:
+    _embedder(fake_vllm, model=model).embed_passages(["um texto"])
+
+    (request,) = fake_vllm.requests
+    assert request["model"] == model
+    assert "dimensions" not in request
 
 
 def test_requests_name_qwen_and_never_ask_for_reduced_dimensions(fake_vllm) -> None:
@@ -122,6 +141,44 @@ def test_passages_are_sent_unchanged(fake_vllm) -> None:
     _embedder(fake_vllm).embed_passages(texts)
 
     assert fake_vllm.texts == texts
+
+
+def test_jina_texts_carry_its_retrieval_prefixes(fake_vllm) -> None:
+    embedder = _embedder(fake_vllm, model=JINA_V5_TEXT_SMALL_MODEL_ID)
+
+    embedder.embed_passages(["Primeiro trecho."])
+    embedder.embed_queries(["Quem e o autor?"])
+
+    assert fake_vllm.texts == ["Document: Primeiro trecho.", "Query: Quem e o autor?"]
+    assert instructed_query("Quem?", JINA_V5_TEXT_SMALL_MODEL_ID) == "Query: Quem?"
+
+
+def test_qwen3_4b_uses_the_qwen_instruction_at_2560_dimensions(fake_vllm) -> None:
+    embedder = _embedder(fake_vllm, model=QWEN3_4B_MODEL_ID)
+
+    passages = embedder.embed_passages(["Primeiro trecho."])
+    queries = embedder.embed_queries(["Quem?"])
+
+    assert passages.shape == queries.shape == (1, 2560)
+    assert np.allclose(np.linalg.norm(passages, axis=1), 1.0, atol=1e-6)
+    assert fake_vllm.texts == ["Primeiro trecho.", QUERY_INSTRUCTION + "Quem?"]
+    assert embedder.embed_passages([]).shape == (0, 2560)
+
+
+def test_a_vector_of_another_models_size_is_rejected(fake_vllm) -> None:
+    fake_vllm.script.append(lambda inputs: (200, ok_response(inputs, 1024)))
+
+    with pytest.raises(EmbeddingServiceError, match="1024 dimensions, expected 2560"):
+        _embedder(fake_vllm, model=QWEN3_4B_MODEL_ID).embed_passages(["texto"])
+
+
+def test_bge_m3_texts_carry_no_instruction(fake_vllm) -> None:
+    embedder = _embedder(fake_vllm, model=BGE_M3_MODEL_ID)
+
+    embedder.embed_passages(["Primeiro trecho."])
+    embedder.embed_queries(["Quem e o autor?"])
+
+    assert fake_vllm.texts == ["Primeiro trecho.", "Quem e o autor?"]
 
 
 # --- happy path ---------------------------------------------------------------
@@ -207,6 +264,27 @@ def test_a_transient_failure_is_retried(fake_vllm, status) -> None:
     assert vectors.shape == (1, DIMENSION)
     assert len(fake_vllm.requests) == 2
     assert len(slept) == 1
+
+
+def test_a_response_cut_off_mid_body_is_retried(fake_vllm) -> None:
+    slept: list[float] = []
+    fake_vllm.script.append(lambda _inputs: (200, TRUNCATED))
+
+    vectors = _embedder(fake_vllm, sleep=slept.append).embed_passages(["texto"])
+
+    assert vectors.shape == (1, DIMENSION)
+    assert len(fake_vllm.requests) == 2
+    assert len(slept) == 1
+
+
+def test_responses_cut_off_every_time_fail_as_retryable(fake_vllm) -> None:
+    fake_vllm.script.extend([lambda _inputs: (200, TRUNCATED)] * 2)
+
+    with pytest.raises(EmbeddingServiceError, match="disconnected: IncompleteRead") as caught:
+        _embedder(fake_vllm, max_attempts=2).embed_passages(["texto"])
+
+    assert caught.value.retryable is True
+    assert "texto" not in str(caught.value)
 
 
 @pytest.mark.parametrize("status", [400, 401, 403, 404, 413, 422])

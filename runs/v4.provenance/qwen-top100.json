@@ -1,0 +1,15 @@
+{
+  "run_file": "runs/v4/qwen-top100.json",
+  "generation_id": "20260923-210317-04e526",
+  "generation_manifest_sha256": "5d7b1a5f196c1d7fd66e429e5d19cf0cad8e36f8ad17ba5d3e775e568400f7d6",
+  "index_build_id": "ib-20260923-210753-1334284f",
+  "model_id": "Qwen/Qwen3-Embedding-0.6B",
+  "model_revision": "unpinned",
+  "query_instruction": "Instruct: Retrieve the passage from the same legal document that answers the question.\nQuery:",
+  "chunk_text_profile": "corpus-text:no-title:no-instruction:v1",
+  "normalization": "l2",
+  "score": "cosine_similarity",
+  "split": "test",
+  "top_k": 100,
+  "queries": 7065
+}

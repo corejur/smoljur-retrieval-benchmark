@@ -95,14 +95,15 @@ def test_the_migration_is_idempotent(conn) -> None:
     assert _one(conn, "SELECT extversion FROM pg_extension WHERE extname = 'vector'")
 
 
-def test_embedding_is_a_non_null_vector_1024(conn) -> None:
+def test_embedding_is_a_non_null_unsized_vector(conn) -> None:
+    """Unsized so each model keeps its native dimension (checked per build)."""
     row = _one(
         conn,
         """SELECT format_type(a.atttypid, a.atttypmod), a.attnotnull
            FROM pg_attribute a WHERE a.attrelid = 'indexed_chunks'::regclass
            AND a.attname = 'embedding'""",
     )
-    assert row == ("vector(1024)", True)
+    assert row == ("vector", True)
 
 
 @pytest.mark.parametrize(
@@ -164,16 +165,18 @@ def test_the_active_pointer_references_a_build_of_the_same_generation_and_model(
     conn.rollback()
 
 
-def test_a_wrong_dimension_is_refused_by_the_column(conn) -> None:
+def test_a_wrong_dimension_is_refused_at_validation(conn) -> None:
     build_id = create_build(conn, _provenance(chunk_count=1))
-    with pytest.raises((psycopg.errors.DataException, IndexBuildError)):
-        insert_chunks(conn, build_id, [IndexedChunk("x", "d", 0, np.ones(1023, dtype=np.float32))])
-    conn.rollback()
+    vector = np.ones(1023, dtype=np.float32) / np.sqrt(1023)
+    insert_chunks(conn, build_id, [IndexedChunk("x", "d", 0, vector)])
+
+    with pytest.raises(IndexBuildError, match="1024-dimensional"):
+        validate_build(conn, build_id, {"x": ("d", 0)})
 
 
-def test_only_qwen_test_split_builds_are_accepted(conn) -> None:
-    with pytest.raises(IndexBuildError, match="Qwen"):
-        create_build(conn, _provenance(model_id="BAAI/bge-m3"))
+def test_only_benchmarked_model_test_split_builds_are_accepted(conn) -> None:
+    with pytest.raises(IndexBuildError, match="intfloat/e5-large"):
+        create_build(conn, _provenance(model_id="intfloat/e5-large"))
     with pytest.raises(IndexBuildError, match="test"):
         create_build(conn, _provenance(split="train"))
 
@@ -343,3 +346,88 @@ def test_connect_names_a_missing_environment_variable(monkeypatch) -> None:
     monkeypatch.delenv("V4_NOT_SET_DSN", raising=False)
     with pytest.raises(IndexBuildError, match="V4_NOT_SET_DSN"):
         connect("V4_NOT_SET_DSN")
+
+
+# --- per-model dimensions -------------------------------------------------------
+
+
+def test_a_build_must_declare_its_models_own_dimension(conn) -> None:
+    from scripts.v4.embeddings import QWEN3_4B_MODEL_ID
+
+    with pytest.raises(IndexBuildError, match="2560-dimensional; got 1024"):
+        create_build(conn, _provenance(model_id=QWEN3_4B_MODEL_ID))
+    conn.rollback()
+
+    build_id = create_build(conn, _provenance(model_id=QWEN3_4B_MODEL_ID, dimension=2560))
+    insert_chunks(conn, build_id, [IndexedChunk("c1", "d1", 0, np.eye(2560, dtype=np.float32)[0])])
+    assert conn.execute(
+        "SELECT vector_dims(embedding) FROM indexed_chunks WHERE index_build_id = %s", (build_id,)
+    ).fetchone() == (2560,)
+
+
+def test_validation_checks_rows_against_the_builds_dimension(conn) -> None:
+    from scripts.v4.embeddings import QWEN3_4B_MODEL_ID
+
+    build_id = create_build(
+        conn, _provenance(model_id=QWEN3_4B_MODEL_ID, dimension=2560, chunk_count=1)
+    )
+    insert_chunks(conn, build_id, [IndexedChunk("c1", "d1", 0, np.eye(1024, dtype=np.float32)[0])])
+
+    with pytest.raises(IndexBuildError, match="2560-dimensional"):
+        validate_build(conn, build_id, {"c1": ("d1", 0)})
+
+
+_FIXED_SIZE_SCHEMA = """
+CREATE TABLE index_builds (
+    index_build_id text PRIMARY KEY, model_id text NOT NULL, model_revision text NOT NULL,
+    generation_id text NOT NULL, generation_manifest_sha256 text NOT NULL, source_sha256 text NOT NULL,
+    split text NOT NULL, dimension integer NOT NULL CHECK (dimension = 1024), metric text NOT NULL,
+    normalized boolean NOT NULL, query_instruction text NOT NULL, chunk_text_profile text NOT NULL,
+    chunk_count integer NOT NULL, status text NOT NULL DEFAULT 'building',
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (index_build_id, generation_id, model_id)
+);
+CREATE TABLE indexed_chunks (
+    index_build_id text NOT NULL REFERENCES index_builds (index_build_id), chunk_id text NOT NULL,
+    document_id text NOT NULL, chunk_index integer NOT NULL, embedding vector(1024) NOT NULL,
+    PRIMARY KEY (index_build_id, chunk_id)
+);
+INSERT INTO index_builds VALUES ('ib-old', 'Qwen/Qwen3-Embedding-0.6B', 'unpinned', 'gen-1',
+    repeat('a', 64), repeat('b', 64), 'test', 1024, 'cosine', true, 'q', 'p', 1, 'active');
+"""
+
+
+def test_the_migration_unfixes_a_1024_only_database(pg_env) -> None:
+    """A database created before per-model dimensions keeps its rows and accepts any size."""
+    connection = connect(pg_env)
+    try:
+        connection.execute("CREATE SCHEMA legacy")
+        connection.execute("SET search_path TO legacy, public")
+        connection.execute(_FIXED_SIZE_SCHEMA)
+        connection.execute(
+            "INSERT INTO indexed_chunks VALUES ('ib-old', 'c1', 'd1', 0, %s)",
+            ("[" + ",".join(["1"] + ["0"] * 1023) + "]",),
+        )
+        connection.commit()
+
+        migrate(connection)
+        migrate(connection)  # idempotent
+
+        check = connection.execute(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+            "WHERE conname = 'index_builds_dimension_check' "
+            "AND conrelid = 'legacy.index_builds'::regclass"
+        ).fetchone()[0]
+        typmod = connection.execute(
+            "SELECT atttypmod FROM pg_attribute "
+            "WHERE attrelid = 'legacy.indexed_chunks'::regclass AND attname = 'embedding'"
+        ).fetchone()[0]
+        kept = connection.execute("SELECT vector_dims(embedding) FROM legacy.indexed_chunks").fetchall()
+        assert "dimension > 0" in check
+        assert typmod == -1
+        assert kept == [(1024,)]
+    finally:
+        connection.rollback()
+        connection.execute("DROP SCHEMA IF EXISTS legacy CASCADE")
+        connection.commit()
+        connection.close()

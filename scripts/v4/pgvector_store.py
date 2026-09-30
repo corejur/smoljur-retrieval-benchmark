@@ -1,4 +1,4 @@
-"""PostgreSQL/pgvector storage for the Qwen chunk index (contracts/model-index.md).
+"""PostgreSQL/pgvector storage for the per-model chunk indexes.
 
 A build moves through `building -> validated -> active -> superseded`, or to
 `failed`. Rows are inserted only while `building`; a database trigger keeps
@@ -23,7 +23,7 @@ from typing import Iterable, Mapping, Sequence
 
 import numpy as np
 
-from scripts.v4.embeddings import DIMENSION, QWEN_MODEL_ID
+from scripts.v4.embeddings import DIMENSION, MODELS
 
 __all__ = [
     "BuildProvenance",
@@ -142,9 +142,14 @@ def new_index_build_id() -> str:
 
 def create_build(conn, provenance: BuildProvenance) -> str:
     """Register a new `building` build that no reader will select."""
-    if provenance.model_id != QWEN_MODEL_ID:
+    if provenance.model_id not in MODELS:
         raise IndexBuildError(
-            f"only {QWEN_MODEL_ID} builds are allowed; got {provenance.model_id!r}"
+            f"only builds of {', '.join(MODELS)} are allowed; got {provenance.model_id!r}"
+        )
+    native = MODELS[provenance.model_id].dimension
+    if provenance.dimension != native:
+        raise IndexBuildError(
+            f"{provenance.model_id} builds are {native}-dimensional; got {provenance.dimension}"
         )
     if provenance.split != "test":
         raise IndexBuildError(
@@ -216,7 +221,7 @@ def validate_build(
     `corpus` maps every published chunk ID to its `(document_id,
     chunk_index)`. The build must hold exactly those chunks — a bijection —
     each filed under its own document and position, with a unit-length
-    1,024-dimensional vector.
+    vector of the build's declared dimension.
     """
     status, provenance = _build_row(conn, build_id)
     if status != "building":
@@ -253,12 +258,12 @@ def validate_build(
         "SELECT chunk_id FROM indexed_chunks WHERE index_build_id = %s AND "
         "(vector_dims(embedding) <> %s OR abs(vector_norm(embedding) - 1) > %s) "
         "ORDER BY chunk_id LIMIT 5",
-        (build_id, DIMENSION, _NORM_TOLERANCE),
+        (build_id, provenance.dimension, _NORM_TOLERANCE),
     ).fetchall()
     if bad:
         raise IndexBuildError(
             f"build {build_id} holds vectors that are not unit-norm "
-            f"{DIMENSION}-dimensional: {[row[0] for row in bad]}"
+            f"{provenance.dimension}-dimensional: {[row[0] for row in bad]}"
         )
     conn.execute(
         "UPDATE index_builds SET status = 'validated', updated_at = now() "

@@ -146,3 +146,16 @@ docs/
 representative_redator_test.csv
 scripts/dataset_inspect.ipynb
 datasets/redator_v4_test/
+
+# Agent and development tooling: kept local, not part of the code
+.specify/
+.claude/
+.vscode/
+AGENTS.md
+specs/
+
+# Superseded top-10 Qwen run and the comparison report built from it
+runs/v4/qwen-top10.json
+runs/v4.provenance/qwen-top10.json
+reports/v4/qwen-top10.*
+reports/v4/comparison.*

@@ -471,10 +471,10 @@ def test_candidate_sets_are_nonempty_and_from_the_source_document(tmp_path: Path
 
 
 def test_the_synthetic_fixture_builds_its_expected_generation(tmp_path: Path) -> None:
-    """contracts/fixture-v4.csv: 2 documents, 2 passages, 2 queries, 2 qrels."""
+    """fixtures/fixture-v4.csv: 2 documents, 2 passages, 2 queries, 2 qrels."""
     from scripts.v4.source_contract import file_sha256, iter_source_rows, verify_source_file
 
-    fixture = Path("specs/001-redator-v4-dataset-pipeline/contracts/fixture-v4.csv")
+    fixture = Path(__file__).with_name("fixtures") / "fixture-v4.csv"
     fingerprint = verify_source_file(
         fixture, expected_sha256=file_sha256(fixture), expected_row_count=2
     )

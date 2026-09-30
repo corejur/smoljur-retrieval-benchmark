@@ -18,11 +18,12 @@ import json
 import math
 import os
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from scripts.v4.generation import locate_generation, manifest_sha256, read_manifest
+from scripts.v4.retrieve import default_provenance_path
 
 __all__ = [
     "DEFAULT_K_VALUES",
@@ -43,6 +44,23 @@ class ModelScores:
     queries_scored: int
     queries_missing: int
     metrics: dict[str, float] = field(default_factory=dict)
+    #: The embedding model's Hugging Face ID, from the run's provenance record,
+    #: or None when the run has none (e.g. a run made outside retrieve.py).
+    model_id: str | None = None
+
+
+def run_model_id(run_file: str | Path) -> str | None:
+    """The `model_id` retrieve.py recorded for `run_file`, if any.
+
+    A symlinked run is followed to its real location, where its provenance
+    record lives (`<runs>.provenance/<run>.json`).
+    """
+    record = default_provenance_path(Path(run_file).resolve())
+    try:
+        model_id = json.loads(record.read_text(encoding="utf-8")).get("model_id")
+    except (OSError, ValueError, AttributeError):
+        return None
+    return model_id if isinstance(model_id, str) and model_id else None
 
 
 def load_qrels(path: str | Path) -> dict[str, dict[str, int]]:
@@ -252,9 +270,8 @@ def evaluate_directory(
             if "metrics report" in str(error):
                 continue  # this module's own output, not a competitor
             raise
-        scored.append(
-            evaluate_run(qrels, run, model=path.stem, k_values=k_values)
-        )
+        scores = evaluate_run(qrels, run, model=path.stem, k_values=k_values)
+        scored.append(replace(scores, model_id=run_model_id(path)))
     if not scored:
         raise ValueError(f"no run files in {runs_directory}")
     return scored
@@ -297,6 +314,7 @@ def comparison_report(
         "models": [
             {
                 "model": item.model,
+                **({"model_id": item.model_id} if item.model_id else {}),
                 "queries_scored": item.queries_scored,
                 "queries_missing": item.queries_missing,
                 "metrics": item.metrics,

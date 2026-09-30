@@ -12,7 +12,9 @@ pytest.importorskip("psycopg")
 
 from scripts.v4.embeddings import (  # noqa: E402
     CHUNK_TEXT_PROFILE,
+    JINA_V5_TEXT_SMALL,
     QUERY_INSTRUCTION,
+    QWEN3_4B,
     QWEN_MODEL_ID,
     EmbeddingServiceError,
     RemoteEmbedder,
@@ -108,14 +110,49 @@ def test_the_build_records_its_generation_and_text_provenance(published, fake_vl
     assert provenance.chunk_count == build.row_count == generation.summary.chunks
 
 
-def test_only_the_qwen_model_can_be_indexed(published, pg_env) -> None:
+def test_only_benchmarked_models_can_be_indexed(published, pg_env) -> None:
     root, _ = published
-    with pytest.raises(ValueError, match="Qwen"):
+    with pytest.raises(ValueError, match="not a benchmarked model"):
         build_index(
             root,
             embedder=RemoteEmbedder("http://127.0.0.1:1/v1", model="intfloat/e5-large"),
             dsn_env=pg_env,
         )
+
+
+def test_each_model_keeps_its_own_active_build(published, fake_vllm, pg_env) -> None:
+    root, generation = published
+    corpus = _corpus(generation.path)
+
+    qwen = build_index(root, embedder=_embedder(fake_vllm), dsn_env=pg_env)
+    fake_vllm.requests.clear()
+    jina = build_index(
+        root, embedder=_embedder(fake_vllm, model=JINA_V5_TEXT_SMALL.model_id), dsn_env=pg_env
+    )
+
+    assert sorted(fake_vllm.texts) == sorted("Document: " + r["text"] for r in corpus)
+    with connect(pg_env) as conn:
+        assert active_build(conn, generation.generation_id, QWEN_MODEL_ID).index_build_id == qwen.index_build_id
+        build = active_build(conn, generation.generation_id, JINA_V5_TEXT_SMALL.model_id)
+    assert build.index_build_id == jina.index_build_id
+    assert jina.previous_index_build_id is None
+    assert build.provenance.query_instruction == "Query: "
+    assert build.provenance.chunk_text_profile == JINA_V5_TEXT_SMALL.chunk_text_profile
+
+
+def test_a_model_is_indexed_at_its_own_dimension(published, fake_vllm, pg_env) -> None:
+    root, generation = published
+
+    result = build_index(root, embedder=_embedder(fake_vllm, model=QWEN3_4B.model_id), dsn_env=pg_env)
+
+    with connect(pg_env) as conn:
+        build = active_build(conn, generation.generation_id, QWEN3_4B.model_id)
+        dims = conn.execute(
+            "SELECT DISTINCT vector_dims(embedding) FROM indexed_chunks WHERE index_build_id = %s",
+            (result.index_build_id,),
+        ).fetchall()
+    assert build.provenance.dimension == 2560
+    assert dims == [(2560,)]
 
 
 def test_a_rebuild_supersedes_the_previous_active_build(published, fake_vllm, pg_env) -> None:

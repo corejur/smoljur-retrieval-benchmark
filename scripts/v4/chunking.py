@@ -21,7 +21,7 @@ from functools import lru_cache
 from typing import Any, Mapping, Sequence
 
 from scripts.v4.headings import is_heading as v4_is_heading
-from scripts.strategies.chunking.legal_recursive import (
+from scripts.v4.legal_recursive import (
     Chunk,
     ChunkingConfig,
     LengthCounter,

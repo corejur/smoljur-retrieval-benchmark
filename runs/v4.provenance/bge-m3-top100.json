@@ -1,0 +1,35 @@
+{
+  "run_file": "runs/v4/bge-m3-top100.json",
+  "generation_id": "20260923-210317-04e526",
+  "generation_manifest_sha256": "5d7b1a5f196c1d7fd66e429e5d19cf0cad8e36f8ad17ba5d3e775e568400f7d6",
+  "index_build_id": "ib-20260930-190703-11cf00f6",
+  "model_id": "BAAI/bge-m3",
+  "model_revision": "unpinned",
+  "query_instruction": "",
+  "chunk_text_profile": "corpus-text:no-title:no-instruction:v1",
+  "normalization": "l2",
+  "score": "cosine_similarity",
+  "split": "test",
+  "top_k": 100,
+  "queries": 7065,
+  "cost": {
+    "wall_seconds": 43.482,
+    "embedding": {
+      "requests": 111,
+      "attempts": 111,
+      "texts": 7065,
+      "prompt_tokens": 360623,
+      "seconds": 27.15
+    },
+    "search": {
+      "queries": 7065,
+      "seconds": 12.361,
+      "latency_ms": {
+        "mean": 1.75,
+        "p50": 0.888,
+        "p95": 5.873,
+        "max": 21.451
+      }
+    }
+  }
+}

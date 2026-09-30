@@ -1,13 +1,13 @@
-"""Document-scoped retrieval from the stored Qwen pgvector build.
+"""Document-scoped retrieval from one model's stored pgvector build.
 
     python -m scripts.v4.retrieve DATASET_BEIR RUN_FILE --base-url https://host/v1
-        [--model Qwen/Qwen3-Embedding-0.6B] [--model-revision REV]
+        [--model MODEL_ID] [--model-revision REV]
         [--postgres-dsn-env V4_POSTGRES_DSN] [--split test] [--top-k N]
         [--batch-size N] [--format json|trec] [--provenance PATH]
 
 This module ranks and writes a run; it computes no metric (see metrics.py).
 Chunk vectors come from the active index build in PostgreSQL; only questions
-are sent to the trusted vLLM server, under the versioned Qwen instruction.
+are sent to the trusted vLLM server, under the model's versioned instruction.
 Each question is ranked exactly against its own document's published
 candidates, filtered before cosine-distance ordering.
 
@@ -32,10 +32,10 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from scripts.v4.embeddings import (
-    CHUNK_TEXT_PROFILE,
-    DIMENSION,
-    QUERY_INSTRUCTION,
+    MODELS,
+    QWEN,
     QWEN_MODEL_ID,
+    EmbeddingModel,
     EmbeddingUsage,
     RemoteEmbedder,
 )
@@ -120,22 +120,25 @@ def check_compatible(
     generation_manifest_sha256: str,
     chunk_count: int,
     model_revision: str,
+    profile: EmbeddingModel = QWEN,
 ) -> None:
     """Refuse a build that was made for other data or other text handling."""
     provenance = build.provenance
     expected = {
         "generation_id": generation_id,
         "generation manifest_sha256": generation_manifest_sha256,
+        "model": profile.model_id,
         "model revision": model_revision,
-        "query_instruction": QUERY_INSTRUCTION,
-        "chunk_text_profile": CHUNK_TEXT_PROFILE,
-        "dimension": DIMENSION,
+        "query_instruction": profile.query_instruction,
+        "chunk_text_profile": profile.chunk_text_profile,
+        "dimension": profile.dimension,
         "metric": "cosine",
         "normalized": True,
     }
     actual = {
         "generation_id": provenance.generation_id,
         "generation manifest_sha256": provenance.generation_manifest_sha256,
+        "model": provenance.model_id,
         "model revision": provenance.model_revision,
         "query_instruction": provenance.query_instruction,
         "chunk_text_profile": provenance.chunk_text_profile,
@@ -275,6 +278,7 @@ def rank(
             generation_manifest_sha256=manifest_digest,
             chunk_count=manifest.chunks,
             model_revision=model_revision,
+            profile=embedder.profile,
         )
         queries = load_queries(beir / "queries.jsonl")
         candidates = load_candidates(beir / "candidates" / f"{split}.jsonl")
@@ -369,7 +373,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("beir_directory", type=Path, help="<dataset>/current/beir")
     parser.add_argument("output", type=Path, help="Run file for metrics.py")
-    parser.add_argument("--model", default=QWEN_MODEL_ID, help=f"Only {QWEN_MODEL_ID} is accepted")
+    parser.add_argument("--model", default=QWEN_MODEL_ID, choices=MODELS, help="Model served by the vLLM server")
     parser.add_argument("--model-revision", default="unpinned", help="Must match the index build")
     parser.add_argument(
         "--base-url",
