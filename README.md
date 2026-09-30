@@ -78,6 +78,7 @@ Hugging Face ID. Every model ran on vLLM 0.30.0 with `--runner pooling
 |---|---|---|---|
 | `Qwen/Qwen3-Embedding-0.6B` (default) | 1024 | — | query: `Instruct: Retrieve the passage from the same legal document that answers the question.\nQuery:` + question |
 | `Qwen/Qwen3-Embedding-4B` | 2560 | — | same as 0.6B |
+| `Qwen/Qwen3-Embedding-8B` | 4096 | — | same as 0.6B |
 | `jinaai/jina-embeddings-v5-text-small` | 1024 | `--trust-remote-code --hf-overrides '{"jina_task": "retrieval"}' --pooler-config '{"seq_pooling_type": "LAST"}'` | `Query: ` + question, `Document: ` + passage |
 | `BAAI/bge-m3` | 1024 | `--pooler-config '{"seq_pooling_type": "CLS"}'` | question and passage unchanged |
 

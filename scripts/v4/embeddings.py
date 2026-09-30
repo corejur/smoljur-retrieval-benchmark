@@ -51,6 +51,8 @@ __all__ = [
     "QWEN",
     "QWEN3_4B",
     "QWEN3_4B_MODEL_ID",
+    "QWEN3_8B",
+    "QWEN3_8B_MODEL_ID",
     "QWEN_MODEL_ID",
     "EmbeddingModel",
     "EmbeddingServiceError",
@@ -64,6 +66,7 @@ __all__ = [
 
 QWEN_MODEL_ID = "Qwen/Qwen3-Embedding-0.6B"
 QWEN3_4B_MODEL_ID = "Qwen/Qwen3-Embedding-4B"
+QWEN3_8B_MODEL_ID = "Qwen/Qwen3-Embedding-8B"
 JINA_V5_TEXT_SMALL_MODEL_ID = "jinaai/jina-embeddings-v5-text-small"
 BGE_M3_MODEL_ID = "BAAI/bge-m3"
 #: The default model output size. Every model is stored at its own full
@@ -123,6 +126,11 @@ QWEN3_4B = EmbeddingModel(
     QWEN3_4B_MODEL_ID, QUERY_INSTRUCTION, "", CHUNK_TEXT_PROFILE, dimension=2560
 )
 
+#: The largest Qwen3-Embedding: same instruction format, 4,096 dimensions.
+QWEN3_8B = EmbeddingModel(
+    QWEN3_8B_MODEL_ID, QUERY_INSTRUCTION, "", CHUNK_TEXT_PROFILE, dimension=4096
+)
+
 #: vLLM (0.30+) merges the model's `retrieval` LoRA adapter at load time but
 #: does not add its prompts, so the `Query: `/`Document: ` prefixes from the
 #: model card are sent with the text.
@@ -137,7 +145,10 @@ JINA_V5_TEXT_SMALL = EmbeddingModel(
 BGE_M3 = EmbeddingModel(BGE_M3_MODEL_ID, "", "", CHUNK_TEXT_PROFILE)
 
 #: The models this pipeline may index or query, by the ID sent to vLLM.
-MODELS = {model.model_id: model for model in (QWEN, QWEN3_4B, JINA_V5_TEXT_SMALL, BGE_M3)}
+MODELS = {
+    model.model_id: model
+    for model in (QWEN, QWEN3_4B, QWEN3_8B, JINA_V5_TEXT_SMALL, BGE_M3)
+}
 
 
 def model_profile(model_id: str) -> EmbeddingModel:

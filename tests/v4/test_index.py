@@ -15,6 +15,7 @@ from scripts.v4.embeddings import (  # noqa: E402
     JINA_V5_TEXT_SMALL,
     QUERY_INSTRUCTION,
     QWEN3_4B,
+    QWEN3_8B,
     QWEN_MODEL_ID,
     EmbeddingServiceError,
     RemoteEmbedder,
@@ -140,19 +141,20 @@ def test_each_model_keeps_its_own_active_build(published, fake_vllm, pg_env) -> 
     assert build.provenance.chunk_text_profile == JINA_V5_TEXT_SMALL.chunk_text_profile
 
 
-def test_a_model_is_indexed_at_its_own_dimension(published, fake_vllm, pg_env) -> None:
+@pytest.mark.parametrize("profile", [QWEN3_4B, QWEN3_8B], ids=lambda p: p.model_id)
+def test_a_model_is_indexed_at_its_own_dimension(published, fake_vllm, pg_env, profile) -> None:
     root, generation = published
 
-    result = build_index(root, embedder=_embedder(fake_vllm, model=QWEN3_4B.model_id), dsn_env=pg_env)
+    result = build_index(root, embedder=_embedder(fake_vllm, model=profile.model_id), dsn_env=pg_env)
 
     with connect(pg_env) as conn:
-        build = active_build(conn, generation.generation_id, QWEN3_4B.model_id)
+        build = active_build(conn, generation.generation_id, profile.model_id)
         dims = conn.execute(
             "SELECT DISTINCT vector_dims(embedding) FROM indexed_chunks WHERE index_build_id = %s",
             (result.index_build_id,),
         ).fetchall()
-    assert build.provenance.dimension == 2560
-    assert dims == [(2560,)]
+    assert build.provenance.dimension == profile.dimension
+    assert dims == [(profile.dimension,)]
 
 
 def test_a_rebuild_supersedes_the_previous_active_build(published, fake_vllm, pg_env) -> None:
