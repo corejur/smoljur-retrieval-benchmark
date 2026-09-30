@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Mapping, Sequence
 
-from scripts.source_normalization import normalize_source_html
+from scripts.v4.source_normalization import normalize_source_html
 from scripts.v4.cleaning import CleanedText, clean_text
 from scripts.v4.questions import QueryRecord
 

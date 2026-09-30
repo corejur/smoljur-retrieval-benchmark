@@ -1,9 +1,10 @@
 """The authoritative file set for the v4 pipeline.
 
-`scripts/` still contains the v1-v3 pipeline. Presence on disk no longer means
-a module is part of the dataset build: this manifest decides. Anything listed
-in EXCLUDED is kept only so the older generations stay reproducible, and must
-not be imported by v4 code.
+The v1-v3 pipeline has been removed from the tree; it remains in the git
+history (main's first commit, 66837db). The two v1-v3 modules v4 still
+depends on now live in `scripts/v4/` and are listed in REUSED. EXCLUDED names
+any older module that must never be imported by v4 code; it is empty now that
+none is left in the tree.
 """
 
 from __future__ import annotations
@@ -40,30 +41,18 @@ VALID: tuple[str, ...] = (
     "scripts/v4/run.py",
 )
 
-#: v1-v3 modules the v4 pipeline still depends on, unchanged.
+#: Modules carried over from v1-v3 that the v4 pipeline depends on.
 REUSED: dict[str, str] = {
-    "scripts/source_normalization.py": "one HTML parse yielding text and citation spans",
-    "scripts/strategies/chunking/legal_recursive.py": (
+    "scripts/v4/source_normalization.py": "one HTML parse yielding text and citation spans",
+    "scripts/v4/legal_recursive.py": (
         "structure-aware chunk splitting; extended with an optional is_heading "
         "hook that defaults to the v1-v3 rules, so v1-v3 output is unchanged"
     ),
 }
 
-#: v1-v3 modules the v4 pipeline replaces. Not imported by anything in v4.
-EXCLUDED: dict[str, str] = {
-    "scripts/artifact_publication.py": (
-        "scripts/v4/publication.py; the shared publisher swaps managed "
-        "directories one at a time, so readers can see a mixed generation"
-    ),
-    "scripts/prepare_dataset.py": "scripts/v4/run.py",
-    "scripts/citation_ground_truth.py": "scripts/v4/ground_truth.py",
-    "scripts/data_cleaner.py": "scripts/v4/cleaning.py",
-    "scripts/query_preparation.py": "scripts/v4/questions.py",
-    "scripts/query_spliter.py": "scripts/v4/questions.py",
-    "scripts/corpus_generator.py": "scripts/v4/ground_truth.prepare_document",
-    "scripts/chunk_corpus.py": "scripts/v4/run.py with scripts/v4/chunking.py",
-    "scripts/export_beir_dataset.py": "scripts/v4/run.py",
-}
+#: Older modules that v4 code must never import, with their v4 replacement.
+#: Empty: the v1-v3 pipeline was removed from the tree.
+EXCLUDED: dict[str, str] = {}
 
 
 @dataclass(frozen=True)
@@ -81,7 +70,7 @@ def verify(root: Path | None = None) -> list[ManifestProblem]:
             problems.append(ManifestProblem(path, "declared but missing"))
     package = base / "scripts" / "v4"
     if package.is_dir():
-        declared = set(VALID)
+        declared = set(VALID) | set(REUSED)
         for path in sorted(package.rglob("*")):
             relative = path.relative_to(base).as_posix()
             # Bytecode caches are generated, never part of the build.

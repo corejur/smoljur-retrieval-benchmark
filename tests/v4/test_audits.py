@@ -275,7 +275,7 @@ def _long_question(words: int) -> str:
 
 
 def test_a_question_over_the_token_limit_is_dropped_and_audited(tmp_path: Path) -> None:
-    from scripts.strategies.chunking.legal_recursive import WordCounter
+    from scripts.v4.legal_recursive import WordCounter
 
     rows = [_row("doc-a", ["Quem e o autor?", _long_question(40)], [_ok(), _ok("p-1")])]
 
@@ -290,7 +290,7 @@ def test_a_question_over_the_token_limit_is_dropped_and_audited(tmp_path: Path) 
 
 
 def test_a_question_exactly_at_the_limit_is_kept(tmp_path: Path) -> None:
-    from scripts.strategies.chunking.legal_recursive import WordCounter
+    from scripts.v4.legal_recursive import WordCounter
 
     rows = [_row("doc-a", [_long_question(30)], [_ok()])]
 
@@ -325,7 +325,7 @@ def test_the_query_token_limit_can_be_disabled(tmp_path: Path) -> None:
 
 
 def test_a_document_whose_only_question_is_too_long_is_rejected(tmp_path: Path) -> None:
-    from scripts.strategies.chunking.legal_recursive import WordCounter
+    from scripts.v4.legal_recursive import WordCounter
 
     rows = [_row("doc-a", [_long_question(40)], [_ok()])]
 

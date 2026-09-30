@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import csv
-from pathlib import Path
-
 import pytest
 
-from scripts.chunk_corpus import write_chunk_csvs
-from scripts.strategies.chunking.legal_recursive import (
+from scripts.v4.legal_recursive import (
     ChunkingConfig,
     chunk_document,
     chunk_documents,
@@ -127,20 +123,3 @@ def test_invalid_configuration_is_rejected() -> None:
             CharacterLengthCounter(),
             ChunkingConfig(target_words=10, overlap_words=10),
         )
-
-
-def test_writes_one_plain_text_csv_per_document(tmp_path: Path) -> None:
-    chunks = chunk_documents(
-        [
-            {"document_id": "doc-a", "text": "First document."},
-            {"document_id": "doc-b", "text": "Second document."},
-        ],
-        CharacterLengthCounter(),
-        config(max_words=128, target_words=100),
-    )
-
-    assert write_chunk_csvs(chunks, tmp_path) == 2
-    with (tmp_path / "doc-a.csv").open(encoding="utf-8", newline="") as source:
-        rows = list(csv.DictReader(source))
-    assert rows[0]["document_id"] == "doc-a"
-    assert rows[0]["text"] == "First document."

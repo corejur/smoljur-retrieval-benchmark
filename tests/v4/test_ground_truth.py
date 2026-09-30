@@ -139,7 +139,7 @@ def test_retained_citation_is_trackable_in_the_source_document() -> None:
     prepared = prepare_document(html, [_query(["p-1"])], document_id="doc")
     span = prepared.evidence[0].spans[0]
 
-    from scripts.source_normalization import normalize_source_html
+    from scripts.v4.source_normalization import normalize_source_html
 
     source_text = normalize_source_html(html).text
     # The cleaned offsets moved because the URL grew; the source offsets did not.
@@ -151,7 +151,7 @@ def test_retained_citation_is_trackable_in_the_source_document() -> None:
 
 
 def test_undersized_drafts_are_merged_into_neighbours() -> None:
-    from scripts.strategies.chunking.legal_recursive import (
+    from scripts.v4.legal_recursive import (
         WordCounter,
         _DraftChunk,
         _merge_undersized,
@@ -179,7 +179,7 @@ def test_undersized_drafts_are_merged_into_neighbours() -> None:
 
 
 def test_merging_never_crosses_a_region_boundary() -> None:
-    from scripts.strategies.chunking.legal_recursive import (
+    from scripts.v4.legal_recursive import (
         WordCounter,
         _DraftChunk,
         _merge_undersized,

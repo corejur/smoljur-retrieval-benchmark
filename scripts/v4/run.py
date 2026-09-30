@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 
-from scripts.strategies.chunking.legal_recursive import ChunkingConfig, LengthCounter
+from scripts.v4.legal_recursive import ChunkingConfig, LengthCounter
 from scripts.v4.chunking import ENCODING_NAME, V4_CHUNKING, chunk_cleaned_document, o200k_counter
 from scripts.v4.cleaning import plain_text_violations
 from scripts.v4.generation import new_generation_id
