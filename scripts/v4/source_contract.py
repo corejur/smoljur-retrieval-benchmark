@@ -36,7 +36,7 @@ __all__ = [
     "verify_source_file",
 ]
 
-#: SHA-256 of the 1,000-row v4 test CSV, per contracts/dataset.md.
+#: SHA-256 of the 1,000-row v4 test CSV.
 V4_TEST_SHA256 = "d10d21f2074e48576cb715bc65ef01a36f369bf837dd2c404280775cef56fff3"
 
 #: Records in that CSV.

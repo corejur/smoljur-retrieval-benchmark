@@ -2,7 +2,7 @@
 #
 # This file provisions ONLY the local PostgreSQL/pgvector database. The trusted
 # remote vLLM embedding service is operator-supplied and deliberately not
-# defined here (see specs/001-redator-v4-dataset-pipeline/plan.md).
+# defined here (see README.md, "Serve a model").
 #
 # Credentials come from the environment, never from this file. Export
 # V4_POSTGRES_PASSWORD or put it in a local .env before starting the service:

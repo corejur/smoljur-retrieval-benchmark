@@ -1,4 +1,4 @@
--- v4 per-model chunk indexes in PostgreSQL/pgvector (contracts/model-index.md).
+-- v4 per-model chunk indexes in PostgreSQL/pgvector.
 --
 -- Idempotent: safe to run on every connection. Exact search only: a B-tree
 -- narrows rows to one build and document before cosine-distance ordering.

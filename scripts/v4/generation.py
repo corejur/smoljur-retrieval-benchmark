@@ -53,7 +53,7 @@ GENERATIONS = "generations"
 BUILDING_PREFIX = ".building-"
 MANIFEST = "meta/manifest.json"
 
-#: Top-level generation-manifest keys, per contracts/dataset.md.
+#: Top-level generation-manifest keys.
 REQUIRED_MANIFEST_KEYS: tuple[str, ...] = (
     "pipeline",
     "split",

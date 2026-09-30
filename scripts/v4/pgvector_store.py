@@ -1,4 +1,4 @@
-"""PostgreSQL/pgvector storage for the per-model chunk indexes (contracts/model-index.md).
+"""PostgreSQL/pgvector storage for the per-model chunk indexes.
 
 A build moves through `building -> validated -> active -> superseded`, or to
 `failed`. Rows are inserted only while `building`; a database trigger keeps
