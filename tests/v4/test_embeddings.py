@@ -20,6 +20,7 @@ from scripts.v4.embeddings import (
     MODELS,
     QUERY_INSTRUCTION,
     QWEN3_4B_MODEL_ID,
+    QWEN3_8B_MODEL_ID,
     QWEN_MODEL_ID,
     EmbeddingServiceError,
     EndpointConfigurationError,
@@ -50,6 +51,7 @@ def test_only_benchmarked_models_are_accepted() -> None:
     assert set(MODELS) == {
         QWEN_MODEL_ID,
         QWEN3_4B_MODEL_ID,
+        QWEN3_8B_MODEL_ID,
         JINA_V5_TEXT_SMALL_MODEL_ID,
         BGE_M3_MODEL_ID,
     }
@@ -163,6 +165,16 @@ def test_qwen3_4b_uses_the_qwen_instruction_at_2560_dimensions(fake_vllm) -> Non
     assert np.allclose(np.linalg.norm(passages, axis=1), 1.0, atol=1e-6)
     assert fake_vllm.texts == ["Primeiro trecho.", QUERY_INSTRUCTION + "Quem?"]
     assert embedder.embed_passages([]).shape == (0, 2560)
+
+
+def test_qwen3_8b_uses_the_qwen_instruction_at_4096_dimensions(fake_vllm) -> None:
+    embedder = _embedder(fake_vllm, model=QWEN3_8B_MODEL_ID)
+
+    passages = embedder.embed_passages(["Primeiro trecho."])
+    queries = embedder.embed_queries(["Quem?"])
+
+    assert passages.shape == queries.shape == (1, 4096)
+    assert fake_vllm.texts == ["Primeiro trecho.", QUERY_INSTRUCTION + "Quem?"]
 
 
 def test_a_vector_of_another_models_size_is_rejected(fake_vllm) -> None:
