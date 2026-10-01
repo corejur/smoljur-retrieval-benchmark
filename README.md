@@ -13,9 +13,10 @@ questions, top 100 per question. Full numbers are in
 
 | Model | Pass@1 | Pass@5 | Pass@10 | Pass@20 | NDCG@10 | MRR@10 |
 |---|---|---|---|---|---|---|
-| Qwen/Qwen3-Embedding-4B | **0.383** | **0.727** | **0.844** | **0.920** | **0.520** | **0.530** |
-| Qwen/Qwen3-Embedding-0.6B | 0.322 | 0.675 | 0.808 | 0.898 | 0.464 | 0.470 |
-| jinaai/jina-embeddings-v5-text-small | 0.321 | 0.654 | 0.785 | 0.879 | 0.455 | 0.463 |
+| Qwen/Qwen3-Embedding-8B | **0.390** | **0.738** | **0.849** | **0.923** | **0.526** | **0.537** |
+| Qwen/Qwen3-Embedding-4B | 0.383 | 0.727 | 0.844 | 0.920 | 0.520 | 0.530 |
+| Qwen/Qwen3-Embedding-0.6B | 0.322 | 0.675 | 0.808 | 0.898 | 0.464 | 0.469 |
+| jinaai/jina-embeddings-v5-text-small | 0.321 | 0.654 | 0.785 | 0.879 | 0.454 | 0.463 |
 | BAAI/bge-m3 | 0.266 | 0.588 | 0.723 | 0.839 | 0.393 | 0.401 |
 
 ![Pass@k per model](reports/v4/pass-top100.png)
