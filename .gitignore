@@ -153,9 +153,3 @@ datasets/redator_v4_test/
 .vscode/
 AGENTS.md
 specs/
-
-# Superseded top-10 Qwen run and the comparison report built from it
-runs/v4/qwen-top10.json
-runs/v4.provenance/qwen-top10.json
-reports/v4/qwen-top10.*
-reports/v4/comparison.*
